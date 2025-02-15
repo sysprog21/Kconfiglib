@@ -18,13 +18,13 @@ concurrency:
 jobs:
   package:
     name: Package
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.12'
 
     - name: Check Python version
       run: |
