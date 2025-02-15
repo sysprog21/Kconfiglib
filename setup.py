@@ -10,13 +10,13 @@ setuptools.setup(
     version="14.1.1a4",
     description="A flexible Python Kconfig implementation",
 
-    # Make sure that README.rst decodes on Python 3 in environments that use
+    # Make sure that README.md decodes on Python 3 in environments that use
     # the C locale (which implies ASCII), by explicitly giving the encoding.
     #
     # io.open() has the 'encoding' parameter on both Python 2 and 3. open()
     # doesn't have it on Python 2. This lets us use the same code for both.
     long_description=io.open(
-        os.path.join(os.path.dirname(__file__), "README.rst"),
+        os.path.join(os.path.dirname(__file__), "README.md"),
         encoding="utf-8"
     ).read(),
 
