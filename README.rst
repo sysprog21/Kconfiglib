@@ -1,33 +1,3 @@
-.. contents:: Table of contents
-   :backlinks: none
-
-News
-----
-
-Dependency loop with recent linux-next kernels
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To fix issues with dependency loops on recent linux-next kernels, apply `this
-patch <https://www.spinics.net/lists/linux-kbuild/msg23455.html>`_. Hopefully,
-it will be in ``linux-next`` soon.
-
-``windows-curses`` is no longer automatically installed on Windows
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Starting with Kconfiglib 13.0.0, the `windows-curses
-<https://github.com/zephyrproject-rtos/windows-curses>`__ package is no longer
-automatically installed on Windows, and needs to be installed manually for the
-terminal ``menuconfig`` to work.
-
-This fixes installation of Kconfiglib on MSYS2, which is not compatible with
-``windows-curses``. See `this issue
-<https://github.com/ulfalizer/Kconfiglib/issues/77>`__.
-
-The ``menuconfig`` now shows a hint re. installing ``windows-curses`` when the
-``curses`` module can't be imported on Windows.
-
-Sorry if this change caused problems!
-
 Overview
 --------
 
@@ -53,8 +23,7 @@ Since Kconfiglib is based around a library, it can be used e.g. to generate a
 `Kconfig cross-reference
 <https://docs.zephyrproject.org/latest/reference/kconfig/index.html>`_, using
 the same robust Kconfig parser used for other Kconfig tools, instead of brittle
-ad-hoc parsing. The documentation generation script can be found `here
-<https://github.com/zephyrproject-rtos/zephyr/blob/master/doc/scripts/genrest.py>`__.
+ad-hoc parsing.
 
 Kconfiglib implements the recently added `Kconfig preprocessor
 <https://github.com/torvalds/linux/blob/master/Documentation/kbuild/kconfig-macro-language.rst>`__.
@@ -636,11 +605,6 @@ Real-world examples
   from the `Zephyr <https://www.zephyrproject.org/>`_ project handles
   ``.config`` and header file generation, also doing configuration fragment
   merging
-
-- `genrest.py
-  <https://github.com/zephyrproject-rtos/zephyr/blob/master/doc/scripts/genrest.py>`_
-  generates a Kconfig symbol cross-reference, which can be viewed `here
-  <http://docs.zephyrproject.org/reference/kconfig/index.html>`__
 
 - `CMake and IDE integration
   <https://github.com/espressif/esp-idf/tree/master/tools/kconfig_new>`_ from
