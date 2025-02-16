@@ -378,7 +378,7 @@ Three configuration interfaces are currently available:
   `guiconfig.py` has been tested on X11, Windows, and macOS, and it works with both Python 2 and Python 3.
 
   Although Tkinter is part of the Python standard library, it is not always installed by default on Linux.
-  The commands below install it on a few different distributions:
+  The commands below install it on a few different systems:
   - Ubuntu/Debian:
     ```shell
     sudo apt install python-tk
@@ -396,6 +396,10 @@ Three configuration interfaces are currently available:
   - Clear Linux:
     ```shell
     sudo swupd bundle-add python3-tcl
+    ```
+  - macOS:
+    ```shell
+    brew install python-tk
     ```
 
   Screenshot below, with show-all mode enabled and the jump-to dialog open:
