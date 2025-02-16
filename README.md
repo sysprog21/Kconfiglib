@@ -140,7 +140,7 @@ For `n`-valued `bool` / `tristate` options, the line `# CONFIG_FOO is not set` (
 allowing the option to be tested via `ifdef` in Make.
 
 If you rely on this behavior, consider passing `--config-out <filename>` to `genconfig` and including the generated configuration file instead of `.config` directly.
-This ensures the included file is always a “full” configuration file, even if `.config` becomes outdated.
+This ensures the included file is always a "full" configuration file, even if `.config` becomes outdated.
 Otherwise, you may need to run `old(def)config`, `menuconfig`, or `guiconfig` before rebuilding.
 
 If you use the `--sync-deps` option to generate incremental build information,
@@ -454,10 +454,6 @@ Some examples include:
 
   These examples use the older Kconfiglib 1 API, which was clunkier and less general
   (e.g., functions instead of properties, no direct access to the menu structure, and a more limited `__str__()` output):
-
-- [genboardscfg.py](http://git.denx.de/?p=u-boot.git;a=blob;f=tools/genboardscfg.py;hb=HEAD)
-  from [Das U-Boot](http://www.denx.de/wiki/U-Boot) generates a legacy board database by
-  extracting information from a newer Kconfig-based configuration system.
 
 - [gen-manual-lists.py](https://git.busybox.net/buildroot/tree/support/scripts/gen-manual-lists.py?id=5676a2deea896f38123b99781da0a612865adeb0)
   produced listings for an appendix in the [Buildroot](https://buildroot.org) manual.
