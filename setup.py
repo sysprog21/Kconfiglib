@@ -20,7 +20,7 @@ setuptools.setup(
         encoding="utf-8"
     ).read(),
 
-    url="https://github.com/zephyrproject-rtos/Kconfiglib",
+    url="https://github.com/sysprog21/Kconfiglib",
     author='Zephyr Project',
     author_email="ci@zephyrproject.org",
     keywords="kconfig, kbuild, menuconfig, configuration-management",
@@ -68,8 +68,8 @@ setuptools.setup(
     python_requires=">=2.7,!=3.0.*,!=3.1.*",
 
     project_urls={
-        "GitHub repository": "https://github.com/zephyrproject-rtos/Kconfiglib",
-        "Examples": "https://github.com/zephyrproject-rtos/Kconfiglib/tree/master/examples",
+        "GitHub repository": "https://github.com/sysprog21/Kconfiglib",
+        "Examples": "https://github.com/sysprog21/Kconfiglib/tree/main/examples",
     },
 
     classifiers=[
