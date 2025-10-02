@@ -298,6 +298,15 @@ _STYLES = {
     edit=fg:black,bg:white
     jump-edit=fg:black,bg:white
     text=fg:black,bg:white
+    shadow=fg:black,bg:black,bold
+    button-active=fg:black,bg:white
+    button-inactive=fg:white,bg:blue,bold
+    button-key-active=fg:red,bg:white
+    button-key-inactive=fg:white,bg:blue,bold
+    button-label-active=fg:black,bg:white,bold
+    button-label-inactive=fg:yellow,bg:blue,bold
+    dialog=fg:black,bg:white
+    dialog-frame=fg:white,bg:blue,bold
     """,
 
     # This style is forced on terminals that do not support colors
@@ -934,25 +943,26 @@ def _quit_dialog():
     if not _conf_changed:
         return "No changes to save (for '{}')".format(_conf_filename)
 
-    while True:
-        c = _key_dialog(
-            "Quit",
-            " Save configuration?\n"
-            "\n"
-            "(Y)es  (N)o  (C)ancel",
-            "ync")
+    # Use button dialog with Yes/No/Cancel buttons (matching lxdialog style)
+    result = _button_dialog(
+        None,  # No title in yesno dialog
+        "Save configuration?",
+        [" Yes ", "  No  ", " Cancel "],
+        default_button=0)
 
-        if c is None or c == "c":
-            return None
+    if result is None or result == 2:  # ESC or Cancel
+        return None
 
-        if c == "y":
-            # Returns a message to print
-            msg = _try_save(_kconf.write_config, _conf_filename, "configuration")
-            if msg:
-                return msg
+    if result == 0:  # Yes
+        # Returns a message to print
+        msg = _try_save(_kconf.write_config, _conf_filename, "configuration")
+        if msg:
+            return msg
+        # If save failed, try again
+        return None
 
-        elif c == "n":
-            return "Configuration ({}) was not saved".format(_conf_filename)
+    elif result == 1:  # No
+        return "Configuration ({}) was not saved".format(_conf_filename)
 
 
 def _init():
@@ -1367,10 +1377,16 @@ def _draw_main():
 
     _menu_win.erase()
 
+    # Draw box around the menu window (like lxdialog's menubox)
+    menu_win_height, menu_win_width = _menu_win.getmaxyx()
+    _draw_box(_menu_win, 0, 0, menu_win_height, menu_win_width,
+              _style["list"], _style["list"])
+
     # Draw the _shown nodes starting from index _menu_scroll up to either as
     # many as fit in the window, or to the end of _shown
+    # Note: Now we need to account for the border (1 character on each side)
     for i in range(_menu_scroll,
-                   min(_menu_scroll + _height(_menu_win), len(_shown))):
+                   min(_menu_scroll + _height(_menu_win) - 2, len(_shown))):
 
         node = _shown[i]
 
@@ -1383,7 +1399,8 @@ def _draw_main():
         else:
             style = _style["inv-selection" if i == _sel_node_i else "inv-list"]
 
-        _safe_addstr(_menu_win, i - _menu_scroll, 0, _node_str(node), style)
+        # Draw inside the box (offset by 1 row and 1 column)
+        _safe_addstr(_menu_win, 1 + i - _menu_scroll, 1, _node_str(node), style)
 
     _menu_win.noutrefresh()
 
@@ -1789,6 +1806,13 @@ def _resize_input_dialog(win, title, info_lines):
 def _draw_input_dialog(win, title, info_lines, s, i, hscroll):
     edit_width = _width(win) - 4
 
+    # Get window position and size for shadow
+    win_y, win_x = win.getbegyx()
+    win_height, win_width = win.getmaxyx()
+
+    # Draw shadow on stdscr first
+    _draw_shadow(_stdscr, win_y, win_x, win_height, win_width)
+
     win.erase()
 
     # Note: Perhaps having a separate window for the input field would be nicer
@@ -1983,35 +2007,304 @@ def _resize_key_dialog(win, text):
 
 
 def _draw_key_dialog(win, title, text):
+    # Get window position and size for shadow
+    win_y, win_x = win.getbegyx()
+    win_height, win_width = win.getmaxyx()
+
+    # Draw shadow on stdscr first
+    _draw_shadow(_stdscr, win_y, win_x, win_height, win_width)
+
     win.erase()
 
+    # Draw the frame first
+    _draw_frame(win, title)
+
+    # Then draw text content inside the frame
+    win.attron(_style["body"])
     for i, line in enumerate(text.split("\n")):
         _safe_addstr(win, 2 + i, 2, line)
-
-    # Draw the frame last so that it overwrites the body text for small windows
-    _draw_frame(win, title)
+    win.attroff(_style["body"])
 
     win.noutrefresh()
 
 
+def _button_dialog(title, text, buttons, default_button=0):
+    # Dialog with button selection support, matching lxdialog's yesno/msgbox
+    #
+    # title: Dialog title (shown at top of border if provided)
+    # text: Dialog text content
+    # buttons: List of button labels (e.g., [" Yes ", "  No  ", " Cancel "])
+    # default_button: Index of initially selected button
+    #
+    # Returns: Index of selected button, or None if ESC pressed
+
+    win = _styled_win("dialog")
+    win.keypad(True)
+
+    selected_button = default_button
+
+    # Calculate window size based on content
+    lines = text.split("\n")
+    # Height: border(1) + text lines + blank + separator(1) + buttons + border(1)
+    # = 1 + len(lines) + 1 + 1 + 1 + 1 = len(lines) + 5
+    win_height = min(len(lines) + 5, _height(_stdscr) - 4)
+    # Calculate width from longest line and button row
+    # Button row width includes buttons + spacing between them
+    # 2 buttons: spacing 13, 3+ buttons: spacing 4
+    spacing = 13 if len(buttons) == 2 else 4
+    button_row_width = sum(len(b) + 2 for b in buttons) + spacing * (len(buttons) - 1)
+    win_width = min(max(max(len(line) for line in lines) + 4, button_row_width + 4),
+                    _width(_stdscr) - 4)
+
+    win.resize(win_height, win_width)
+    win.mvwin((_height(_stdscr) - win_height)//2,
+              (_width(_stdscr) - win_width)//2)
+
+    while True:
+        # Draw main display behind dialog
+        _draw_main()
+
+        # Get window position and size
+        win_y, win_x = win.getbegyx()
+        win_height, win_width = win.getmaxyx()
+
+        # Don't draw shadow for now - TODO: Add shadow support later
+
+        win.erase()
+
+        # Draw box border with proper colors
+        # Use dialog-frame (blue background) for both box and border to get uniform blue frame
+        _draw_box(win, 0, 0, win_height, win_width,
+                  _style.get("dialog-frame", _style["dialog"]),
+                  _style.get("dialog-frame", _style["dialog"]))
+
+        # Draw title bar with blue background if title provided
+        if title:
+            # Fill entire top line with blue background
+            win.attron(_style.get("dialog-frame", _style["dialog"]))
+            for i in range(1, win_width - 1):
+                _safe_addch(win, 0, i, ord(' '))
+            # Draw title text centered
+            title_x = (win_width - len(title)) // 2
+            _safe_addstr(win, 0, title_x, title)
+            win.attroff(_style.get("dialog-frame", _style["dialog"]))
+
+        # Draw horizontal separator line before buttons (height - 3)
+        # This line should have blue background
+        win.attron(_style.get("dialog-frame", _style["dialog"]))
+        _safe_addch(win, win_height - 3, 0, curses.ACS_LTEE)
+        for i in range(1, win_width - 1):
+            _safe_addch(win, win_height - 3, i, curses.ACS_HLINE)
+        _safe_addch(win, win_height - 3, win_width - 1, curses.ACS_RTEE)
+        win.attroff(_style.get("dialog-frame", _style["dialog"]))
+
+        # Draw text content with blue background (dialog-frame style)
+        # Fill text area with blue background
+        win.attron(_style.get("dialog-frame", _style["dialog"]))
+        for i in range(1, win_height - 3):
+            for j in range(1, win_width - 1):
+                _safe_addch(win, i, j, ord(' '))
+        # Draw text lines
+        for i, line in enumerate(lines):
+            if i < len(lines):
+                # Text starts at row 1, column 2 (inside border)
+                _safe_addstr(win, 1 + i, 2, line)
+        win.attroff(_style.get("dialog-frame", _style["dialog"]))
+
+        # Buttons at row (height - 2)
+        button_y = win_height - 2
+
+        # Fill button row with blue background (dialog-frame style)
+        win.attrset(_style.get("dialog-frame", _style["dialog"]))
+        for i in range(1, win_width - 1):
+            _safe_addch(win, button_y, i, ord(' '))
+
+        # Calculate button positions with spacing
+        # For Yes/No: 13 chars spacing (from lxdialog/yesno.c)
+        # For 3+ buttons: smaller spacing for better fit
+        if len(buttons) == 2:
+            # Two buttons: use fixed spacing of 13
+            spacing = 13
+            total_width = (len(buttons[0]) + 2) + spacing + (len(buttons[1]) + 2)
+            button_x = (win_width - total_width) // 2
+            button_positions = [
+                button_x,
+                button_x + len(buttons[0]) + 2 + spacing
+            ]
+        else:
+            # Three or more buttons: use smaller spacing
+            spacing = 4
+            total_width = sum(len(b) + 2 for b in buttons) + spacing * (len(buttons) - 1)
+            button_x = (win_width - total_width) // 2
+            button_positions = []
+            current_x = button_x
+            for i, b in enumerate(buttons):
+                button_positions.append(current_x)
+                current_x += len(b) + 2 + spacing  # button width + spacing
+
+        # Draw buttons at calculated positions
+        for i, button_label in enumerate(buttons):
+            _print_button(win, button_label, button_y, button_positions[i], i == selected_button)
+
+        win.noutrefresh()
+        curses.doupdate()
+
+        # Handle input
+        c = _getch_compat(win)
+
+        if c == curses.KEY_RESIZE:
+            _resize_main()
+            # Recalculate window size
+            win.resize(win_height, win_width)
+            win.mvwin((_height(_stdscr) - win_height)//2,
+                      (_width(_stdscr) - win_width)//2)
+
+        elif c == "\x1B":  # ESC
+            return None
+
+        elif c == "\t" or c == curses.KEY_RIGHT:  # TAB or RIGHT arrow
+            selected_button = (selected_button + 1) % len(buttons)
+
+        elif c == curses.KEY_LEFT:  # LEFT arrow
+            selected_button = (selected_button - 1) % len(buttons)
+
+        elif c == " " or c == "\n":  # SPACE or ENTER
+            return selected_button
+
+        elif isinstance(c, str):
+            # Check for hotkey match
+            c_lower = c.lower()
+            for i, button_label in enumerate(buttons):
+                if button_label.strip().lower().startswith(c_lower):
+                    return i
+
+
+def _print_button(win, label, y, x, selected):
+    # Print a button matching lxdialog's print_button()
+    #
+    # Format: <Label> with first letter highlighted
+    # selected: If True, button is active (white background - reversed)
+    # inactive: blue background (same as dialog background)
+
+    # Count leading spaces
+    leading_spaces = len(label) - len(label.lstrip(' '))
+    label_stripped = label.lstrip(' ')
+
+    # Move to position
+    _safe_move(win, y, x)
+
+    # Draw bracket "<" with button style
+    win.attrset(_style["button-active" if selected else "button-inactive"])
+    _safe_addstr(win, y, x, "<")
+
+    # Draw leading spaces with label style
+    win.attrset(_style["button-label-active" if selected else "button-label-inactive"])
+    for _ in range(leading_spaces):
+        _safe_addch(win, y, x + 1 + _, ord(' '))
+
+    # Draw first character (hotkey) with key style
+    if label_stripped:
+        win.attrset(_style["button-key-active" if selected else "button-key-inactive"])
+        _safe_addch(win, y, x + 1 + leading_spaces, ord(label_stripped[0]))
+
+        # Draw rest of label with label style
+        win.attrset(_style["button-label-active" if selected else "button-label-inactive"])
+        _safe_addstr(win, y, x + 1 + leading_spaces + 1, label_stripped[1:])
+
+    # Draw bracket ">" with button style
+    win.attrset(_style["button-active" if selected else "button-inactive"])
+    _safe_addstr(win, y, x + 1 + len(label), ">")
+
+    # Move cursor to the hotkey position for selected button
+    _safe_move(win, y, x + 1 + leading_spaces)
+
+
+def _draw_box(win, y, x, height, width, box_attr, border_attr):
+    # Draw a rectangular box with line drawing characters, matching lxdialog's draw_box()
+    #
+    # box_attr: attribute for box body and right/bottom borders
+    # border_attr: attribute for left/top borders
+
+    for i in range(height):
+        for j in range(width):
+            win_y, win_x = y + i, x + j
+
+            # Corners
+            if i == 0 and j == 0:
+                win.attrset(border_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_ULCORNER)
+            elif i == height - 1 and j == 0:
+                win.attrset(border_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_LLCORNER)
+            elif i == 0 and j == width - 1:
+                win.attrset(box_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_URCORNER)
+            elif i == height - 1 and j == width - 1:
+                win.attrset(box_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_LRCORNER)
+            # Edges
+            elif i == 0:
+                win.attrset(border_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_HLINE)
+            elif i == height - 1:
+                win.attrset(box_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_HLINE)
+            elif j == 0:
+                win.attrset(border_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_VLINE)
+            elif j == width - 1:
+                win.attrset(box_attr)
+                _safe_addch(win, win_y, win_x, curses.ACS_VLINE)
+            # Interior - don't fill, let caller handle background
+            else:
+                pass  # Interior is handled by caller
+
+
+def _draw_shadow(win, y, x, height, width):
+    # Draw shadows along the right and bottom edge to give a more 3D look,
+    # matching lxdialog's draw_shadow()
+
+    if curses.has_colors():
+        # Note: We need to define shadow color if not already defined
+        # For now, use a simple approach: draw with shadow style
+        try:
+            win.attrset(_style.get("shadow", 0))
+        except:
+            # Fallback: use dimmed/dark color
+            win.attrset(curses.A_DIM)
+
+        # Bottom shadow (offset by 2 on x-axis)
+        for i in range(width):
+            try:
+                ch = win.inch(y + height, x + 2 + i)
+                _safe_addch(win, y + height, x + 2 + i, ch & curses.A_CHARTEXT)
+            except:
+                pass
+
+        # Right shadow (2 characters wide)
+        for i in range(1, height + 1):
+            try:
+                ch1 = win.inch(y + i, x + width)
+                _safe_addch(win, y + i, x + width, ch1 & curses.A_CHARTEXT)
+                ch2 = win.inch(y + i, x + width + 1)
+                _safe_addch(win, y + i, x + width + 1, ch2 & curses.A_CHARTEXT)
+            except:
+                pass
+
+
 def _draw_frame(win, title):
     # Draw a frame around the inner edges of 'win', with 'title' at the top
+    # Now uses _draw_box() for proper box drawing characters
 
     win_height, win_width = win.getmaxyx()
 
-    win.attron(_style["frame"])
-
-    # Draw top/bottom edge
-    _safe_hline(win,              0, 0, " ", win_width)
-    _safe_hline(win, win_height - 1, 0, " ", win_width)
-
-    # Draw left/right edge
-    _safe_vline(win, 0,             0, " ", win_height)
-    _safe_vline(win, 0, win_width - 1, " ", win_height)
+    # Draw box with frame style for both border and box
+    _draw_box(win, 0, 0, win_height, win_width,
+              _style["frame"], _style["frame"])
 
     # Draw title
+    win.attron(_style["frame"])
     _safe_addstr(win, 0, max((win_width - len(title))//2, 0), title)
-
     win.attroff(_style["frame"])
 
 
