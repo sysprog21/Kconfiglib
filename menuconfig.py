@@ -64,16 +64,14 @@ $srctree is supported through Kconfiglib.
 Color schemes
 =============
 
+The default color scheme matches the Linux kernel's menuconfig (mconf/lxdialog).
 It is possible to customize the color scheme by setting the MENUCONFIG_STYLE
-environment variable. For example, setting it to 'aquatic' will enable an
-alternative, less yellow, more 'make menuconfig'-like color scheme, contributed
-by Mitja Horvat (pinkfluid).
+environment variable.
 
 This is the current list of built-in styles:
-    - default       classic Kconfiglib theme with a yellow accent
+    - linux         style matching the Linux kernel's menuconfig (mconf/lxdialog) [default]
     - monochrome    colorless theme (uses only bold and standout) attributes,
                     this style is used if the terminal doesn't support colors
-    - aquatic       blue-tinted style loosely resembling the lxdialog theme
 
 It is possible to customize the current style by changing colors of UI
 elements on the screen. This is the list of elements that can be stylized:
@@ -137,11 +135,11 @@ If there's an error in the style definition or if a missing style is assigned
 to, the assignment will be ignored, along with a warning being printed on
 stderr.
 
-The 'default' theme is always implicitly parsed first, so the following two
+The 'linux' theme is always implicitly parsed first, so the following two
 settings have the same effect:
 
     MENUCONFIG_STYLE="selection=fg:white,bg:red"
-    MENUCONFIG_STYLE="default selection=fg:white,bg:red"
+    MENUCONFIG_STYLE="linux selection=fg:white,bg:red"
 
 If the terminal doesn't support colors, the 'monochrome' theme is used, and
 MENUCONFIG_STYLE is ignored. The assumption is that the environment is broken
@@ -284,23 +282,25 @@ view the help of the selected item without leaving the dialog.
 #
 
 _STYLES = {
-    "default": """
-    path=fg:black,bg:white,bold
-    separator=fg:black,bg:yellow,bold
+    # Style matching the Linux kernel's menuconfig (mconf/lxdialog)
+    # Precisely matches lxdialog's set_bluetitle_theme() and set_classic_theme()
+    "linux": """
+    path=fg:white,bg:blue,bold
+    separator=fg:black,bg:white
     list=fg:black,bg:white
     selection=fg:white,bg:blue,bold
     inv-list=fg:red,bg:white
-    inv-selection=fg:red,bg:blue
-    help=path
-    show-help=list
-    frame=fg:black,bg:yellow,bold
-    body=fg:white,bg:black
-    edit=fg:white,bg:blue
-    jump-edit=edit
-    text=list
+    inv-selection=fg:red,bg:blue,bold
+    help=fg:black,bg:white
+    show-help=fg:black,bg:white
+    frame=fg:white,bg:blue,bold
+    body=fg:black,bg:white
+    edit=fg:black,bg:white
+    jump-edit=fg:black,bg:white
+    text=fg:black,bg:white
     """,
 
-    # This style is forced on terminals that do no support colors
+    # This style is forced on terminals that do not support colors
     "monochrome": """
     path=bold
     separator=bold,standout
@@ -315,16 +315,6 @@ _STYLES = {
     edit=standout
     jump-edit=
     text=
-    """,
-
-    # Blue-tinted style loosely resembling lxdialog
-    "aquatic": """
-    path=fg:white,bg:blue
-    separator=fg:white,bg:cyan
-    help=path
-    frame=fg:white,bg:cyan
-    body=fg:white,bg:blue
-    edit=fg:black,bg:white
     """
 }
 
@@ -617,9 +607,9 @@ def _init_styles():
             # seems to be a lot of general brokenness there.
             pass
 
-        # Use the 'default' theme as the base, and add any user-defined style
+        # Use the 'linux' theme as the base, and add any user-defined style
         # settings from the environment
-        _parse_style("default", True)
+        _parse_style("linux", True)
         if "MENUCONFIG_STYLE" in os.environ:
             _parse_style(os.environ["MENUCONFIG_STYLE"], False)
     else:
