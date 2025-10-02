@@ -138,7 +138,7 @@ only supported for backwards compatibility).
     if args.env_list is not None:
         with _open_write(args.env_list) as f:
             for env_var in kconf.env_vars:
-                f.write("{}={}\n".format(env_var, os.environ[env_var]))
+                f.write("{}={}\n".format(env_var, os.environ.get(env_var, "")))
 
 
 def _open_write(path):
