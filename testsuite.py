@@ -89,7 +89,7 @@ log = False
 
 
 def run_tests():
-    global obsessive, log
+    global obsessive, obsessive_min_config, log
     for s in sys.argv[1:]:
         if s == "obsessive":
             obsessive = True
@@ -2379,7 +2379,7 @@ header header from env.
     verify_props("select", c.syms["MULTIDEF"].selects,
                  "AA BB CC DD EE FF GG HH II JJ")
 
-    verify_props("imply", c.syms["MULTIDEF"].selects,
+    verify_props("imply", c.syms["MULTIDEF"].implies,
                  "AA BB CC DD EE FF GG HH II JJ")
 
     verify_props("select", c.syms["MULTIDEF_CHOICE"].selects,

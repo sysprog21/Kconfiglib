@@ -555,7 +555,7 @@ def _style_to_curses(style_def):
         color_def = color_def.split(":", 1)[1]
 
         # HTML format, #RRGGBB
-        if re.match("#[A-Fa-f0-9]{6}", color_def):
+        if re.match("^#[A-Fa-f0-9]{6}$", color_def):
             return _color_from_rgb((
                 int(color_def[1:3], 16),
                 int(color_def[3:5], 16),
