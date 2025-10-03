@@ -3148,6 +3148,22 @@ class Kconfig(object):
 
         return expr
 
+    def _parse_depends(self):
+        # Parses 'depends on' with optional conditional: 'depends on A if B'
+        # Converts 'A if B' to '!B || A' (if B is false, dependency is satisfied;
+        # if B is true, dependency becomes A)
+
+        expr = self._parse_expr(True)
+
+        if self._check_token(_T_IF):
+            # Transform "A if B" into "!B || A"
+            expr = self._make_or((NOT, self._parse_expr(True)), expr)
+
+        if self._tokens[self._tokens_i] is not None:
+            self._trailing_tokens_error()
+
+        return expr
+
     def _parse_props(self, node):
         # Parses and adds properties to the MenuNode 'node' (type, 'prompt',
         # 'default's, etc.) Properties are later copied up to symbols and
@@ -3183,7 +3199,7 @@ class Kconfig(object):
                     self._parse_error("expected 'on' after 'depends'")
 
                 node.dep = self._make_and(node.dep,
-                                          self._expect_expr_and_eol())
+                                          self._parse_depends())
 
             elif t0 is _T_HELP:
                 self._parse_help(node)

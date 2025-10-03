@@ -1324,6 +1324,30 @@ tests/Krecursive2:1
                  "A || B || C")
 
 
+    print("Testing conditional dependencies (depends on A if B)")
+
+    c = Kconfig("Kconfiglib/tests/Kconddep")
+
+    # "depends on A if B" should become "!B || A"
+    verify_equal(expr_str(c.syms["COND_DEP_1"].direct_dep), "!B || A")
+
+    # "depends on (C && D) if E" should become "!E || (C && D)"
+    verify_equal(expr_str(c.syms["COND_DEP_2"].direct_dep), "!E || (C && D)")
+
+    # Multiple depends combined: "depends on A", "depends on B if C", "depends on D"
+    # Should become: "A && (!C || B) && D"
+    verify_equal(expr_str(c.syms["COND_DEP_MIXED"].direct_dep),
+                 "A && (!C || B) && D")
+
+    # Test with choice
+    verify_equal(expr_str(c.named_choices["COND_CHOICE"].direct_dep), "!Y || X")
+
+    # Multiple conditional dependencies: "depends on A if B" and "depends on C if D"
+    # Should become: "(!B || A) && (!D || C)"
+    verify_equal(expr_str(c.syms["MULTI_COND"].direct_dep),
+                 "(!B || A) && (!D || C)")
+
+
     print("Testing expr_items()")
 
     c = Kconfig("Kconfiglib/tests/Kexpr_items")
