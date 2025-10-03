@@ -286,12 +286,12 @@ _STYLES = {
     # Precisely matches lxdialog's set_bluetitle_theme() and set_classic_theme()
     "linux": """
     path=fg:white,bg:blue,bold
-    separator=fg:black,bg:white
+    separator=fg:white,bg:blue
     list=fg:black,bg:white
     selection=fg:white,bg:blue,bold
     inv-list=fg:red,bg:white
     inv-selection=fg:red,bg:blue,bold
-    help=fg:black,bg:white
+    help=fg:white,bg:blue
     show-help=fg:black,bg:white
     frame=fg:white,bg:blue,bold
     body=fg:black,bg:white
@@ -999,6 +999,10 @@ def _init():
 
     _init_styles()
 
+    # Set stdscr background to match main list style
+    # This ensures areas not covered by subwindows have correct background
+    _stdscr.bkgd(' ', _style.get("list", 0))
+
     # Hide the cursor
     _safe_curs_set(0)
 
@@ -1044,17 +1048,24 @@ def _resize_main():
 
     screen_height, screen_width = _stdscr.getmaxyx()
 
-    _path_win.resize(1, screen_width)
-    _top_sep_win.resize(1, screen_width)
-    _bot_sep_win.resize(1, screen_width)
-
     help_win_height = _SHOW_HELP_HEIGHT if _show_help else \
         len(_MAIN_HELP_LINES)
 
+    # Screen layout:
+    # Row 0: _path_win, Row 1: _top_sep_win, Row 2+: _menu_win
+    # Row (2+menu_win_height): _bot_sep_win
+    # Row (2+menu_win_height+1): _help_win
+    # Total: 1 + 1 + menu_win_height + 1 + help_win_height = screen_height
     menu_win_height = screen_height - help_win_height - 3
+    menu_win_width = screen_width
+
+    _path_win.resize(1, screen_width)
+    _top_sep_win.resize(1, menu_win_width)
 
     if menu_win_height >= 1:
-        _menu_win.resize(menu_win_height, screen_width)
+        _menu_win.resize(menu_win_height, menu_win_width)
+        _bot_sep_win.resize(1, menu_win_width)
+        # _help_win uses full screen width for blue background to extend to right edge
         _help_win.resize(help_win_height, screen_width)
 
         _top_sep_win.mvwin(1, 0)
@@ -1363,8 +1374,10 @@ def _draw_main():
         _safe_hline(_top_sep_win, 0, 4, curses.ACS_UARROW, _N_SCROLL_ARROWS)
 
     # Add the 'mainmenu' text as the title, centered at the top
+    # Use _top_sep_win width instead of term_width for correct centering
+    top_sep_width = _width(_top_sep_win)
     _safe_addstr(_top_sep_win,
-                 0, max((term_width - len(_kconf.mainmenu_text))//2, 0),
+                 0, max((top_sep_width - len(_kconf.mainmenu_text))//2, 0),
                  _kconf.mainmenu_text)
 
     _top_sep_win.noutrefresh()
@@ -1752,12 +1765,22 @@ def _input_dialog(title, initial_text, info_text=None):
     # Horizontal scroll offset
     hscroll = max(i - edit_width() + 1, 0)
 
+    # Create shadow windows once
+    win_y, win_x = win.getbegyx()
+    win_height, win_width = win.getmaxyx()
+    bottom_shadow, right_shadow = _create_shadow_windows(win_y, win_x, win_height, win_width)
+
     while True:
         # Draw the "main" display with the menu, etc., so that resizing still
         # works properly. This is like a stack of windows, only hardcoded for
         # now.
         _draw_main()
+
         _draw_input_dialog(win, title, info_lines, s, i, hscroll)
+
+        # Refresh shadow windows after dialog window to ensure they're on top
+        _refresh_shadow_windows(bottom_shadow, right_shadow)
+
         curses.doupdate()
 
 
@@ -1767,6 +1790,10 @@ def _input_dialog(title, initial_text, info_text=None):
             # Resize the main display too. The dialog floats above it.
             _resize_main()
             _resize_input_dialog(win, title, info_lines)
+            # Recreate shadow windows with new dialog size
+            win_y, win_x = win.getbegyx()
+            win_height, win_width = win.getmaxyx()
+            bottom_shadow, right_shadow = _create_shadow_windows(win_y, win_x, win_height, win_width)
 
         elif c == "\n":
             _safe_curs_set(0)
@@ -1805,13 +1832,6 @@ def _resize_input_dialog(win, title, info_lines):
 
 def _draw_input_dialog(win, title, info_lines, s, i, hscroll):
     edit_width = _width(win) - 4
-
-    # Get window position and size for shadow
-    win_y, win_x = win.getbegyx()
-    win_height, win_width = win.getmaxyx()
-
-    # Draw shadow on stdscr first
-    _draw_shadow(_stdscr, win_y, win_x, win_height, win_width)
 
     win.erase()
 
@@ -1968,10 +1988,20 @@ def _key_dialog(title, text, keys):
 
     _resize_key_dialog(win, text)
 
+    # Create shadow windows once
+    win_y, win_x = win.getbegyx()
+    win_height, win_width = win.getmaxyx()
+    bottom_shadow, right_shadow = _create_shadow_windows(win_y, win_x, win_height, win_width)
+
     while True:
         # See _input_dialog()
         _draw_main()
+
         _draw_key_dialog(win, title, text)
+
+        # Refresh shadow windows after dialog window to ensure they're on top
+        _refresh_shadow_windows(bottom_shadow, right_shadow)
+
         curses.doupdate()
 
 
@@ -1981,6 +2011,10 @@ def _key_dialog(title, text, keys):
             # Resize the main display too. The dialog floats above it.
             _resize_main()
             _resize_key_dialog(win, text)
+            # Recreate shadow windows with new dialog size
+            win_y, win_x = win.getbegyx()
+            win_height, win_width = win.getmaxyx()
+            bottom_shadow, right_shadow = _create_shadow_windows(win_y, win_x, win_height, win_width)
 
         elif c == "\x1B":  # \x1B = ESC
             return None
@@ -2007,13 +2041,6 @@ def _resize_key_dialog(win, text):
 
 
 def _draw_key_dialog(win, title, text):
-    # Get window position and size for shadow
-    win_y, win_x = win.getbegyx()
-    win_height, win_width = win.getmaxyx()
-
-    # Draw shadow on stdscr first
-    _draw_shadow(_stdscr, win_y, win_x, win_height, win_width)
-
     win.erase()
 
     # Draw the frame first
@@ -2060,15 +2087,14 @@ def _button_dialog(title, text, buttons, default_button=0):
     win.mvwin((_height(_stdscr) - win_height)//2,
               (_width(_stdscr) - win_width)//2)
 
+    # Create shadow windows once
+    win_y, win_x = win.getbegyx()
+    win_height, win_width = win.getmaxyx()
+    bottom_shadow, right_shadow = _create_shadow_windows(win_y, win_x, win_height, win_width)
+
     while True:
-        # Draw main display behind dialog
+        # Draw main display behind dialog (calls noutrefresh on all subwindows)
         _draw_main()
-
-        # Get window position and size
-        win_y, win_x = win.getbegyx()
-        win_height, win_width = win.getmaxyx()
-
-        # Don't draw shadow for now - TODO: Add shadow support later
 
         win.erase()
 
@@ -2147,6 +2173,10 @@ def _button_dialog(title, text, buttons, default_button=0):
             _print_button(win, button_label, button_y, button_positions[i], i == selected_button)
 
         win.noutrefresh()
+
+        # Refresh shadow windows after dialog window to ensure they're on top
+        _refresh_shadow_windows(bottom_shadow, right_shadow)
+
         curses.doupdate()
 
         # Handle input
@@ -2158,6 +2188,10 @@ def _button_dialog(title, text, buttons, default_button=0):
             win.resize(win_height, win_width)
             win.mvwin((_height(_stdscr) - win_height)//2,
                       (_width(_stdscr) - win_width)//2)
+            # Recreate shadow windows with new dialog size
+            win_y, win_x = win.getbegyx()
+            win_height, win_width = win.getmaxyx()
+            bottom_shadow, right_shadow = _create_shadow_windows(win_y, win_x, win_height, win_width)
 
         elif c == "\x1B":  # ESC
             return None
@@ -2260,36 +2294,63 @@ def _draw_box(win, y, x, height, width, box_attr, border_attr):
                 pass  # Interior is handled by caller
 
 
-def _draw_shadow(win, y, x, height, width):
-    # Draw shadows along the right and bottom edge to give a more 3D look,
-    # matching lxdialog's draw_shadow()
+def _create_shadow_windows(y, x, height, width, right_y_offset=1):
+    # Create shadow windows for bottom and right edges
+    # Returns tuple of (bottom_shadow_win, right_shadow_win)
+    #
+    # Based on lxdialog's draw_shadow():
+    # - Bottom: at y + height, from x + 2, width chars
+    # - Right: from y + right_y_offset to y + height (inclusive), at x + width, 2 chars wide
 
-    if curses.has_colors():
-        # Note: We need to define shadow color if not already defined
-        # For now, use a simple approach: draw with shadow style
+    if not curses.has_colors():
+        return None, None
+
+    try:
+        shadow_attr = _style.get("shadow", 0)
+
+        # Bottom shadow window (1 line high, width wide, offset by 2 on x)
+        bottom_shadow = None
+        if y + height < _height(_stdscr) and x + 2 + width <= _width(_stdscr):
+            try:
+                bottom_shadow = curses.newwin(1, width, y + height, x + 2)
+                bottom_shadow.bkgd(' ', shadow_attr)
+            except:
+                pass
+
+        # Right shadow window
+        # lxdialog: for (i = y + 1; i < y + height + 1; i++)
+        # Draw from y+right_y_offset to y+height (inclusive)
+        right_shadow = None
+        if x + width + 2 <= _width(_stdscr) and y + height <= _height(_stdscr):
+            try:
+                # From (y + right_y_offset) to (y + height) inclusive
+                # Total rows = (y + height) - (y + right_y_offset) + 1 = height - right_y_offset + 1
+                shadow_height = height - right_y_offset + 1
+                if shadow_height > 0:
+                    right_shadow = curses.newwin(shadow_height, 2, y + right_y_offset, x + width)
+                    right_shadow.bkgd(' ', shadow_attr)
+            except:
+                pass
+
+        return bottom_shadow, right_shadow
+    except:
+        return None, None
+
+
+def _refresh_shadow_windows(bottom_shadow, right_shadow):
+    # Refresh shadow windows, refilling them each time to ensure visibility
+    if bottom_shadow:
         try:
-            win.attrset(_style.get("shadow", 0))
+            bottom_shadow.erase()  # Clear and refill with background
+            bottom_shadow.noutrefresh()
         except:
-            # Fallback: use dimmed/dark color
-            win.attrset(curses.A_DIM)
-
-        # Bottom shadow (offset by 2 on x-axis)
-        for i in range(width):
-            try:
-                ch = win.inch(y + height, x + 2 + i)
-                _safe_addch(win, y + height, x + 2 + i, ch & curses.A_CHARTEXT)
-            except:
-                pass
-
-        # Right shadow (2 characters wide)
-        for i in range(1, height + 1):
-            try:
-                ch1 = win.inch(y + i, x + width)
-                _safe_addch(win, y + i, x + width, ch1 & curses.A_CHARTEXT)
-                ch2 = win.inch(y + i, x + width + 1)
-                _safe_addch(win, y + i, x + width + 1, ch2 & curses.A_CHARTEXT)
-            except:
-                pass
+            pass
+    if right_shadow:
+        try:
+            right_shadow.erase()  # Clear and refill with background
+            right_shadow.noutrefresh()
+        except:
+            pass
 
 
 def _draw_frame(win, title):
@@ -3147,8 +3208,9 @@ def _styled_win(style):
 
 def _set_style(win, style):
     # Changes the style of an existing window
+    # Use bkgd() to immediately fill window with background
 
-    win.bkgdset(" ", _style[style])
+    win.bkgd(" ", _style[style])
 
 
 def _max_scroll(lst, win):
