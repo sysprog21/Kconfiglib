@@ -1,0 +1,28 @@
+# Test conditional dependencies: "depends on A if B"
+# Should be equivalent to "depends on !B || A"
+
+config COND_DEP_1
+    bool
+    depends on A if B
+
+config COND_DEP_2
+    bool
+    depends on (C && D) if E
+
+config COND_DEP_MIXED
+    bool
+    depends on A
+    depends on B if C
+    depends on D
+
+# Test with choice
+choice COND_CHOICE
+    bool "conditional choice"
+    depends on X if Y
+endchoice
+
+# Test multiple conditional dependencies combined
+config MULTI_COND
+    bool
+    depends on A if B
+    depends on C if D
