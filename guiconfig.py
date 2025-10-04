@@ -665,7 +665,7 @@ def _create_kconfig_desc(parent):
     desc = Text(frame, height=12, wrap="none", borderwidth=0, state="disabled")
     desc.grid(column=0, row=0, sticky="nsew")
 
-    # Work around not being to Ctrl-C/V text from a disabled Text widget, with a
+    # Work around not being able to Ctrl-C/V text from a disabled Text widget, with a
     # tip found in https://stackoverflow.com/questions/3842155/is-there-a-way-to-make-the-tkinter-text-widget-read-only
     desc.bind("<1>", lambda _: desc.focus_set())
 

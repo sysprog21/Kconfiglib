@@ -19,7 +19,7 @@
 #    make sure everything passes with it.
 #
 #  - obsessive-min-config:
-#    Like obsessive, for the minimal configuation (defconfig) tests.
+#    Like obsessive, for the minimal configuration (defconfig) tests.
 #
 #  - log:
 #    Log timestamped defconfig test failures to the file test_defconfig_fails.

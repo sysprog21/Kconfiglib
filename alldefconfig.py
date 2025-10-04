@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: ISC
 
 """
-Writes a configuration file where all symbols are set to their their default
+Writes a configuration file where all symbols are set to their default
 values.
 
 The default output filename is '.config'. A different filename can be passed in

@@ -39,7 +39,7 @@ def main():
         "--no-check-exists",
         dest="check_exists",
         action="store_false",
-        help="Ignore assignments to non-existent symbols instead of erroring " "out",
+        help="Ignore assignments to non-existent symbols instead of erroring out",
     )
 
     parser.add_argument(
