@@ -58,10 +58,16 @@ All but two (`genconfig` and `setconfig`) mirror functionality available in the 
 - [listnewconfig](listnewconfig.py)
 - [genconfig](genconfig.py)
 - [setconfig](setconfig.py)
+- [lint](lint.py)
 
 `genconfig` is intended to be run at build time.
 It generates a C header from the configuration and, optionally,
 additional data that can be used to rebuild only the files referencing Kconfig symbols whose values have changed.
+
+`lint.py` is a standalone linter for Kconfig files that performs static analysis to detect potential issues
+such as unused symbols, symbols that can never be enabled, pointless menuconfig entries, and missing CONFIG_
+prefixes in source code. Run it directly with `python3 lint.py <Kconfig>` or see `python3 lint.py --help`
+for available checks.
 
 Starting with Kconfiglib version 12.2.0, all utilities are compatible with both Python 2 and Python 3.
 Previously, `menuconfig.py` was limited to Python 3, so it now offers improved backward compatibility.
