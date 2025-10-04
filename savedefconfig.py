@@ -24,19 +24,19 @@ import kconfiglib
 
 def main():
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=__doc__)
+        formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__
+    )
 
     parser.add_argument(
-        "--kconfig",
-        default="Kconfig",
-        help="Top-level Kconfig file (default: Kconfig)")
+        "--kconfig", default="Kconfig", help="Top-level Kconfig file (default: Kconfig)"
+    )
 
     parser.add_argument(
         "--out",
         metavar="MINIMAL_CONFIGURATION",
         default="defconfig",
-        help="Output filename for minimal configuration (default: defconfig)")
+        help="Output filename for minimal configuration (default: defconfig)",
+    )
 
     args = parser.parse_args()
 

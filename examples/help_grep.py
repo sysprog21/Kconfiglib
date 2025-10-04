@@ -47,8 +47,11 @@ search = re.compile(sys.argv[2], re.IGNORECASE).search
 for node in Kconfig(sys.argv[1]).node_iter():
     match = False
 
-    if isinstance(node.item, (Symbol, Choice)) and \
-       node.help is not None and search(node.help):
+    if (
+        isinstance(node.item, (Symbol, Choice))
+        and node.help is not None
+        and search(node.help)
+    ):
         print(node.item)
         match = True
 

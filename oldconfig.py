@@ -98,9 +98,11 @@ def oldconfig(node):
         # Loop until the user enters a valid value or enters a blank string
         # (for the default value)
         while True:
-            val = input("{} ({}) [{}] ".format(
-                node.prompt[0], _name_and_loc_str(sym),
-                _default_value_str(sym)))
+            val = input(
+                "{} ({}) [{}] ".format(
+                    node.prompt[0], _name_and_loc_str(sym), _default_value_str(sym)
+                )
+            )
 
             if val == "?":
                 _print_help(node)
@@ -139,8 +141,11 @@ def oldconfig(node):
             # symbols get demoted to n-visibility in y-mode choices, and the
             # user-selected symbol had visibility y.)
             for sym in choice.syms:
-                if sym is not choice.user_selection and sym.visibility and \
-                   sym.user_value is None:
+                if (
+                    sym is not choice.user_selection
+                    and sym.visibility
+                    and sym.user_value is None
+                ):
                     # New visible symbols in the choice
                     break
             else:
@@ -162,13 +167,16 @@ def oldconfig(node):
             print("{} ({})".format(node.prompt[0], _name_and_loc_str(choice)))
 
             for i, sym in enumerate(options, 1):
-                print("{} {}. {} ({})".format(
-                    ">" if sym is choice.selection else " ",
-                    i,
-                    # Assume people don't define choice symbols with multiple
-                    # prompts. That generates a warning anyway.
-                    sym.nodes[0].prompt[0],
-                    sym.name))
+                print(
+                    "{} {}. {} ({})".format(
+                        ">" if sym is choice.selection else " ",
+                        i,
+                        # Assume people don't define choice symbols with multiple
+                        # prompts. That generates a warning anyway.
+                        sym.nodes[0].prompt[0],
+                        sym.name,
+                    )
+                )
 
             sel_index = input("choice[1-{}]: ".format(len(options)))
 
@@ -219,8 +227,8 @@ def _name_and_loc_str(sc):
 
     return "{}, defined at {}".format(
         sc.name or "choice",
-        ", ".join("{}:{}".format(node.filename, node.linenr)
-                  for node in sc.nodes))
+        ", ".join("{}:{}".format(node.filename, node.linenr) for node in sc.nodes),
+    )
 
 
 def _print_help(node):
@@ -235,8 +243,9 @@ def _default_value_str(sym):
     # For string/int/hex, returns the default value as-is.
 
     if sym.type in (BOOL, TRISTATE):
-        return "/".join(("NMY" if sym.tri_value == tri else "nmy")[tri]
-                        for tri in sym.assignable)
+        return "/".join(
+            ("NMY" if sym.tri_value == tri else "nmy")[tri] for tri in sym.assignable
+        )
 
     # string/int/hex
     return sym.str_value

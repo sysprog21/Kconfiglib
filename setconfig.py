@@ -28,34 +28,32 @@ import kconfiglib
 
 def main():
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=__doc__)
+        formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__
+    )
 
     parser.add_argument(
-        "--kconfig",
-        default="Kconfig",
-        help="Top-level Kconfig file (default: Kconfig)")
+        "--kconfig", default="Kconfig", help="Top-level Kconfig file (default: Kconfig)"
+    )
 
     parser.add_argument(
         "--no-check-exists",
         dest="check_exists",
         action="store_false",
-        help="Ignore assignments to non-existent symbols instead of erroring "
-             "out")
+        help="Ignore assignments to non-existent symbols instead of erroring " "out",
+    )
 
     parser.add_argument(
         "--no-check-value",
         dest="check_value",
         action="store_false",
-        help="Ignore assignments that didn't \"take\" (where the symbol got a "
-             "different value, e.g. due to unsatisfied dependencies) instead "
-             "of erroring out")
+        help='Ignore assignments that didn\'t "take" (where the symbol got a '
+        "different value, e.g. due to unsatisfied dependencies) instead "
+        "of erroring out",
+    )
 
     parser.add_argument(
-        "assignments",
-        metavar="ASSIGNMENT",
-        nargs="*",
-        help="A 'NAME=value' assignment")
+        "assignments", metavar="ASSIGNMENT", nargs="*", help="A 'NAME=value' assignment"
+    )
 
     args = parser.parse_args()
 
@@ -75,15 +73,18 @@ def main():
         sym = kconf.syms[name]
 
         if not sym.set_value(value):
-            sys.exit("error: '{}' is an invalid value for the {} symbol {}"
-                     .format(value, kconfiglib.TYPE_TO_STR[sym.orig_type],
-                             name))
+            sys.exit(
+                "error: '{}' is an invalid value for the {} symbol {}".format(
+                    value, kconfiglib.TYPE_TO_STR[sym.orig_type], name
+                )
+            )
 
         if args.check_value and sym.str_value != value:
-            sys.exit("error: {} was assigned the value '{}', but got the "
-                     "value '{}'. Check the symbol's dependencies, and make "
-                     "sure that it has a prompt."
-                     .format(name, value, sym.str_value))
+            sys.exit(
+                "error: {} was assigned the value '{}', but got the "
+                "value '{}'. Check the symbol's dependencies, and make "
+                "sure that it has a prompt.".format(name, value, sym.str_value)
+            )
 
     print(kconf.write_config())
 
