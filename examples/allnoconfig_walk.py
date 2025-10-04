@@ -27,9 +27,11 @@ def do_allnoconfig(node):
 
             # Is the symbol a non-allnoconfig_y symbol that can be set to a
             # lower value than its current value?
-            if (not sym.is_allnoconfig_y and
-                sym.assignable and
-                sym.assignable[0] < sym.tri_value):
+            if (
+                not sym.is_allnoconfig_y
+                and sym.assignable
+                and sym.assignable[0] < sym.tri_value
+            ):
 
                 # Yup, lower it
                 sym.set_value(sym.assignable[0])

@@ -20,5 +20,4 @@ expr = sys.argv[2]
 # Enable modules so that m doesn't get demoted to n
 kconf.modules.set_value(2)
 
-print("the expression '{}' evaluates to {}"
-      .format(expr, kconf.eval_string(expr)))
+print("the expression '{}' evaluates to {}".format(expr, kconf.eval_string(expr)))

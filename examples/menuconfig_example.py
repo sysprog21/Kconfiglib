@@ -123,11 +123,20 @@ from __future__ import print_function
 import readline
 import sys
 
-from kconfiglib import Kconfig, \
-                       Symbol, MENU, COMMENT, \
-                       BOOL, TRISTATE, STRING, INT, HEX, UNKNOWN, \
-                       expr_value, \
-                       TRI_TO_STR
+from kconfiglib import (
+    Kconfig,
+    Symbol,
+    MENU,
+    COMMENT,
+    BOOL,
+    TRISTATE,
+    STRING,
+    INT,
+    HEX,
+    UNKNOWN,
+    expr_value,
+    TRI_TO_STR,
+)
 
 
 # Python 2/3 compatibility hack
@@ -136,7 +145,7 @@ if sys.version_info[0] < 3:
 
 
 def indent_print(s, indent):
-    print(indent*" " + s)
+    print(indent * " " + s)
 
 
 def value_str(sc):
@@ -264,8 +273,9 @@ def get_value_from_user(sc):
 
     prompt = "Value for {}".format(sc.name)
     if sc.type in (BOOL, TRISTATE):
-        prompt += " (available: {})" \
-                  .format(", ".join(TRI_TO_STR[val] for val in sc.assignable))
+        prompt += " (available: {})".format(
+            ", ".join(TRI_TO_STR[val] for val in sc.assignable)
+        )
     prompt += ": "
 
     val = input(prompt)
@@ -294,8 +304,10 @@ if __name__ == "__main__":
 
     while True:
         try:
-            cmd = input('Enter a symbol/choice name, "load_config", or '
-                        '"write_config" (or press CTRL+D to exit): ').strip()
+            cmd = input(
+                'Enter a symbol/choice name, "load_config", or '
+                '"write_config" (or press CTRL+D to exit): '
+            ).strip()
         except EOFError:
             print("")
             break
@@ -337,5 +349,7 @@ if __name__ == "__main__":
 
             continue
 
-        print("No symbol/choice named '{}' in the configuration".format(cmd),
-              file=sys.stderr)
+        print(
+            "No symbol/choice named '{}' in the configuration".format(cmd),
+            file=sys.stderr,
+        )

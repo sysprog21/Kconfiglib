@@ -73,13 +73,28 @@ else:
     import tkinter.font as font
     from tkinter import filedialog, messagebox
 
-from kconfiglib import Symbol, Choice, MENU, COMMENT, MenuNode, \
-                       BOOL, TRISTATE, STRING, INT, HEX, \
-                       AND, OR, \
-                       expr_str, expr_value, split_expr, \
-                       standard_sc_expr_str, \
-                       TRI_TO_STR, TYPE_TO_STR, \
-                       standard_kconfig, standard_config_filename
+from kconfiglib import (
+    Symbol,
+    Choice,
+    MENU,
+    COMMENT,
+    MenuNode,
+    BOOL,
+    TRISTATE,
+    STRING,
+    INT,
+    HEX,
+    AND,
+    OR,
+    expr_str,
+    expr_value,
+    split_expr,
+    standard_sc_expr_str,
+    TRI_TO_STR,
+    TYPE_TO_STR,
+    standard_kconfig,
+    standard_config_filename,
+)
 
 
 # If True, use GIF image data embedded in this file instead of separate GIF
@@ -199,7 +214,8 @@ def menuconfig(kconf):
             messagebox.showerror(
                 "Error",
                 "Empty configuration -- nothing to configure.\n\n"
-                "Check that environment variables are set properly.")
+                "Check that environment variables are set properly.",
+            )
             _root.destroy()
             return
 
@@ -218,9 +234,12 @@ def menuconfig(kconf):
     _root.update_idletasks()
 
     # Center the window
-    _root.geometry("+{}+{}".format(
-        (_root.winfo_screenwidth() - _root.winfo_reqwidth())//2,
-        (_root.winfo_screenheight() - _root.winfo_reqheight())//2))
+    _root.geometry(
+        "+{}+{}".format(
+            (_root.winfo_screenwidth() - _root.winfo_reqwidth()) // 2,
+            (_root.winfo_screenheight() - _root.winfo_reqheight()) // 2,
+        )
+    )
 
     # Show it
     _root.deiconify()
@@ -341,25 +360,68 @@ def _load_images():
         else:
             globals()[var_name] = PhotoImage(
                 file=os.path.join(os.path.dirname(__file__), name + ".gif"),
-                format="gif")
+                format="gif",
+            )
 
     # Note: Base64 data can be put on the clipboard with
     #   $ base64 -w0 foo.gif | xclip
 
-    load_image("icon", "R0lGODlhMAAwAPEDAAAAAADQAO7u7v///yH5BAUKAAMALAAAAAAwADAAAAL/nI+gy+2Pokyv2jazuZxryQjiSJZmyXxHeLbumH6sEATvW8OLNtf5bfLZRLFITzgEipDJ4mYxYv6A0ubuqYhWk66tVTE4enHer7jcKvt0LLUw6P45lvEprT6c0+v7OBuqhYdHohcoqIbSAHc4ljhDwrh1UlgSydRCWWlp5wiYZvmSuSh4IzrqV6p4cwhkCsmY+nhK6uJ6t1mrOhuJqfu6+WYiCiwl7HtLjNSZZZis/MeM7NY3TaRKS40ooDeoiVqIultsrav92bi9c3a5KkkOsOJZpSS99m4k/0zPng4Gks9JSbB+8DIcoQfnjwpZCHv5W+ip4aQrKrB0uOikYhiMCBw1/uPoQUMBADs=")
-    load_image("n_bool", "R0lGODdhEAAQAPAAAAgICP///ywAAAAAEAAQAAACIISPacHtvp5kcb5qG85hZ2+BkyiRF8BBaEqtrKkqslEAADs=")
-    load_image("y_bool", "R0lGODdhEAAQAPEAAAgICADQAP///wAAACwAAAAAEAAQAAACMoSPacLtvlh4YrIYsst2cV19AvaVF9CUXBNJJoum7ymrsKuCnhiupIWjSSjAFuWhSCIKADs=")
-    load_image("n_tri", "R0lGODlhEAAQAPD/AAEBAf///yH5BAUKAAIALAAAAAAQABAAAAInlI+pBrAKQnCPSUlXvFhznlkfeGwjKZhnJ65h6nrfi6h0st2QXikFADs=")
-    load_image("m_tri", "R0lGODlhEAAQAPEDAAEBAeQMuv///wAAACH5BAUKAAMALAAAAAAQABAAAAI5nI+pBrAWAhPCjYhiAJQCnWmdoElHGVBoiK5M21ofXFpXRIrgiecqxkuNciZIhNOZFRNI24PhfEoLADs=")
-    load_image("y_tri", "R0lGODlhEAAQAPEDAAICAgDQAP///wAAACH5BAUKAAMALAAAAAAQABAAAAI0nI+pBrAYBhDCRRUypfmergmgZ4xjMpmaw2zmxk7cCB+pWiVqp4MzDwn9FhGZ5WFjIZeGAgA7")
-    load_image("m_my", "R0lGODlhEAAQAPEDAAAAAOQMuv///wAAACH5BAUKAAMALAAAAAAQABAAAAI5nIGpxiAPI2ghxFinq/ZygQhc94zgZopmOLYf67anGr+oZdp02emfV5n9MEHN5QhqICETxkABbQ4KADs=")
-    load_image("y_my", "R0lGODlhEAAQAPH/AAAAAADQAAPRA////yH5BAUKAAQALAAAAAAQABAAAAM+SArcrhCMSSuIM9Q8rxxBWIXawIBkmWonupLd565Um9G1PIs59fKmzw8WnAlusBYR2SEIN6DmAmqBLBxYSAIAOw==")
-    load_image("n_locked", "R0lGODlhEAAQAPABAAAAAP///yH5BAUKAAEALAAAAAAQABAAAAIgjB8AyKwN04pu0vMutpqqz4Hih4ydlnUpyl2r23pxUAAAOw==")
-    load_image("m_locked", "R0lGODlhEAAQAPD/AAAAAOQMuiH5BAUKAAIALAAAAAAQABAAAAIylC8AyKwN04ohnGcqqlZmfXDWI26iInZoyiore05walolV39ftxsYHgL9QBBMBGFEFAAAOw==")
-    load_image("y_locked", "R0lGODlhEAAQAPD/AAAAAADQACH5BAUKAAIALAAAAAAQABAAAAIylC8AyKzNgnlCtoDTwvZwrHydIYpQmR3KWq4uK74IOnp0HQPmnD3cOVlUIAgKsShkFAAAOw==")
-    load_image("not_selected", "R0lGODlhEAAQAPD/AAAAAP///yH5BAUKAAIALAAAAAAQABAAAAIrlA2px6IBw2IpWglOvTYhzmUbGD3kNZ5QqrKn2YrqigCxZoMelU6No9gdCgA7")
-    load_image("selected", "R0lGODlhEAAQAPD/AAAAAP///yH5BAUKAAIALAAAAAAQABAAAAIzlA2px6IBw2IpWglOvTah/kTZhimASJomiqonlLov1qptHTsgKSEzh9H8QI0QzNPwmRoFADs=")
-    load_image("edit", "R0lGODlhEAAQAPIFAAAAAKOLAMuuEPvXCvrxvgAAAAAAAAAAACH5BAUKAAUALAAAAAAQABAAAANCWLqw/gqMBp8cszJxcwVC2FEOEIAi5kVBi3IqWZhuCGMyfdpj2e4pnK+WAshmvxeAcETWlsxPkkBtsqBMa8TIBSQAADs=")
+    load_image(
+        "icon",
+        "R0lGODlhMAAwAPEDAAAAAADQAO7u7v///yH5BAUKAAMALAAAAAAwADAAAAL/nI+gy+2Pokyv2jazuZxryQjiSJZmyXxHeLbumH6sEATvW8OLNtf5bfLZRLFITzgEipDJ4mYxYv6A0ubuqYhWk66tVTE4enHer7jcKvt0LLUw6P45lvEprT6c0+v7OBuqhYdHohcoqIbSAHc4ljhDwrh1UlgSydRCWWlp5wiYZvmSuSh4IzrqV6p4cwhkCsmY+nhK6uJ6t1mrOhuJqfu6+WYiCiwl7HtLjNSZZZis/MeM7NY3TaRKS40ooDeoiVqIultsrav92bi9c3a5KkkOsOJZpSS99m4k/0zPng4Gks9JSbB+8DIcoQfnjwpZCHv5W+ip4aQrKrB0uOikYhiMCBw1/uPoQUMBADs=",
+    )
+    load_image(
+        "n_bool",
+        "R0lGODdhEAAQAPAAAAgICP///ywAAAAAEAAQAAACIISPacHtvp5kcb5qG85hZ2+BkyiRF8BBaEqtrKkqslEAADs=",
+    )
+    load_image(
+        "y_bool",
+        "R0lGODdhEAAQAPEAAAgICADQAP///wAAACwAAAAAEAAQAAACMoSPacLtvlh4YrIYsst2cV19AvaVF9CUXBNJJoum7ymrsKuCnhiupIWjSSjAFuWhSCIKADs=",
+    )
+    load_image(
+        "n_tri",
+        "R0lGODlhEAAQAPD/AAEBAf///yH5BAUKAAIALAAAAAAQABAAAAInlI+pBrAKQnCPSUlXvFhznlkfeGwjKZhnJ65h6nrfi6h0st2QXikFADs=",
+    )
+    load_image(
+        "m_tri",
+        "R0lGODlhEAAQAPEDAAEBAeQMuv///wAAACH5BAUKAAMALAAAAAAQABAAAAI5nI+pBrAWAhPCjYhiAJQCnWmdoElHGVBoiK5M21ofXFpXRIrgiecqxkuNciZIhNOZFRNI24PhfEoLADs=",
+    )
+    load_image(
+        "y_tri",
+        "R0lGODlhEAAQAPEDAAICAgDQAP///wAAACH5BAUKAAMALAAAAAAQABAAAAI0nI+pBrAYBhDCRRUypfmergmgZ4xjMpmaw2zmxk7cCB+pWiVqp4MzDwn9FhGZ5WFjIZeGAgA7",
+    )
+    load_image(
+        "m_my",
+        "R0lGODlhEAAQAPEDAAAAAOQMuv///wAAACH5BAUKAAMALAAAAAAQABAAAAI5nIGpxiAPI2ghxFinq/ZygQhc94zgZopmOLYf67anGr+oZdp02emfV5n9MEHN5QhqICETxkABbQ4KADs=",
+    )
+    load_image(
+        "y_my",
+        "R0lGODlhEAAQAPH/AAAAAADQAAPRA////yH5BAUKAAQALAAAAAAQABAAAAM+SArcrhCMSSuIM9Q8rxxBWIXawIBkmWonupLd565Um9G1PIs59fKmzw8WnAlusBYR2SEIN6DmAmqBLBxYSAIAOw==",
+    )
+    load_image(
+        "n_locked",
+        "R0lGODlhEAAQAPABAAAAAP///yH5BAUKAAEALAAAAAAQABAAAAIgjB8AyKwN04pu0vMutpqqz4Hih4ydlnUpyl2r23pxUAAAOw==",
+    )
+    load_image(
+        "m_locked",
+        "R0lGODlhEAAQAPD/AAAAAOQMuiH5BAUKAAIALAAAAAAQABAAAAIylC8AyKwN04ohnGcqqlZmfXDWI26iInZoyiore05walolV39ftxsYHgL9QBBMBGFEFAAAOw==",
+    )
+    load_image(
+        "y_locked",
+        "R0lGODlhEAAQAPD/AAAAAADQACH5BAUKAAIALAAAAAAQABAAAAIylC8AyKzNgnlCtoDTwvZwrHydIYpQmR3KWq4uK74IOnp0HQPmnD3cOVlUIAgKsShkFAAAOw==",
+    )
+    load_image(
+        "not_selected",
+        "R0lGODlhEAAQAPD/AAAAAP///yH5BAUKAAIALAAAAAAQABAAAAIrlA2px6IBw2IpWglOvTYhzmUbGD3kNZ5QqrKn2YrqigCxZoMelU6No9gdCgA7",
+    )
+    load_image(
+        "selected",
+        "R0lGODlhEAAQAPD/AAAAAP///yH5BAUKAAIALAAAAAAQABAAAAIzlA2px6IBw2IpWglOvTah/kTZhimASJomiqonlLov1qptHTsgKSEzh9H8QI0QzNPwmRoFADs=",
+    )
+    load_image(
+        "edit",
+        "R0lGODlhEAAQAPIFAAAAAKOLAMuuEPvXCvrxvgAAAAAAAAAAACH5BAUKAAUALAAAAAAQABAAAANCWLqw/gqMBp8cszJxcwVC2FEOEIAi5kVBi3IqWZhuCGMyfdpj2e4pnK+WAshmvxeAcETWlsxPkkBtsqBMa8TIBSQAADs=",
+    )
 
 
 def _fix_treeview_issues():
@@ -373,8 +435,9 @@ def _fix_treeview_issues():
     # so do it ourselves. The font will probably always be TkDefaultFont, but
     # play it safe and look it up.
 
-    _treeview_rowheight = font.Font(font=style.lookup("Treeview", "font")) \
-        .metrics("linespace") + 2
+    _treeview_rowheight = (
+        font.Font(font=style.lookup("Treeview", "font")).metrics("linespace") + 2
+    )
 
     style.configure("Treeview", rowheight=_treeview_rowheight)
 
@@ -387,8 +450,14 @@ def _fix_treeview_issues():
         # be future-safe.
         style.map(
             "Treeview",
-            **{option: [elm for elm in style.map("Treeview", query_opt=option)
-                        if elm[:2] != ("!disabled", "!selected")]})
+            **{
+                option: [
+                    elm
+                    for elm in style.map("Treeview", query_opt=option)
+                    if elm[:2] != ("!disabled", "!selected")
+                ]
+            }
+        )
 
 
 def _init_misc_ui():
@@ -422,32 +491,33 @@ def _create_top_widgets():
     topframe = ttk.Frame(_root)
     topframe.grid(column=0, row=0, sticky="ew")
 
-    ttk.Button(topframe, text="Save", command=_save) \
-        .grid(column=0, row=0, sticky="ew", padx=".05c", pady=".05c")
+    ttk.Button(topframe, text="Save", command=_save).grid(
+        column=0, row=0, sticky="ew", padx=".05c", pady=".05c"
+    )
 
-    ttk.Button(topframe, text="Save as...", command=_save_as) \
-        .grid(column=1, row=0, sticky="ew")
+    ttk.Button(topframe, text="Save as...", command=_save_as).grid(
+        column=1, row=0, sticky="ew"
+    )
 
-    ttk.Button(topframe, text="Save minimal (advanced)...",
-               command=_save_minimal) \
-        .grid(column=2, row=0, sticky="ew", padx=".05c")
+    ttk.Button(topframe, text="Save minimal (advanced)...", command=_save_minimal).grid(
+        column=2, row=0, sticky="ew", padx=".05c"
+    )
 
-    ttk.Button(topframe, text="Open...", command=_open) \
-        .grid(column=3, row=0)
+    ttk.Button(topframe, text="Open...", command=_open).grid(column=3, row=0)
 
-    ttk.Button(topframe, text="Jump to...", command=_jump_to_dialog) \
-        .grid(column=4, row=0, padx=".05c")
+    ttk.Button(topframe, text="Jump to...", command=_jump_to_dialog).grid(
+        column=4, row=0, padx=".05c"
+    )
 
     _show_name_var = BooleanVar()
-    ttk.Checkbutton(topframe, text="Show name", command=_do_showname,
-                    variable=_show_name_var) \
-        .grid(column=0, row=1, sticky="nsew", padx=".05c", pady="0 .05c",
-              ipady=".2c")
+    ttk.Checkbutton(
+        topframe, text="Show name", command=_do_showname, variable=_show_name_var
+    ).grid(column=0, row=1, sticky="nsew", padx=".05c", pady="0 .05c", ipady=".2c")
 
     _show_all_var = BooleanVar()
-    ttk.Checkbutton(topframe, text="Show all", command=_do_showall,
-                    variable=_show_all_var) \
-        .grid(column=1, row=1, sticky="nsew", pady="0 .05c")
+    ttk.Checkbutton(
+        topframe, text="Show all", command=_do_showall, variable=_show_all_var
+    ).grid(column=1, row=1, sticky="nsew", pady="0 .05c")
 
     # Allow the show-all and single-menu status to be queried via plain global
     # Python variables, which is faster and simpler
@@ -460,12 +530,16 @@ def _create_top_widgets():
     _show_all_var.set(False)
 
     _single_menu_var = BooleanVar()
-    ttk.Checkbutton(topframe, text="Single-menu mode", command=_do_tree_mode,
-                    variable=_single_menu_var) \
-        .grid(column=2, row=1, sticky="nsew", padx=".05c", pady="0 .05c")
+    ttk.Checkbutton(
+        topframe,
+        text="Single-menu mode",
+        command=_do_tree_mode,
+        variable=_single_menu_var,
+    ).grid(column=2, row=1, sticky="nsew", padx=".05c", pady="0 .05c")
 
-    _backbutton = ttk.Button(topframe, text="<--", command=_leave_menu,
-                             state="disabled")
+    _backbutton = ttk.Button(
+        topframe, text="<--", command=_leave_menu, state="disabled"
+    )
     _backbutton.grid(column=0, row=4, sticky="nsew", padx=".05c", pady="0 .05c")
 
     def tree_mode_updated(*_):
@@ -485,8 +559,9 @@ def _create_top_widgets():
     topframe.columnconfigure(5, weight=1)
 
     _menupath = ttk.Label(topframe)
-    _menupath.grid(column=0, row=3, columnspan=6, sticky="w", padx="0.05c",
-                   pady="0 .05c")
+    _menupath.grid(
+        column=0, row=3, columnspan=6, sticky="w", padx="0.05c", pady="0 .05c"
+    )
 
 
 def _create_kconfig_tree_and_desc(parent):
@@ -538,8 +613,7 @@ def _create_kconfig_tree(parent):
 
     frame = ttk.Frame(parent)
 
-    tree = ttk.Treeview(frame, selectmode="browse", height=20,
-                        columns=("name",))
+    tree = ttk.Treeview(frame, selectmode="browse", height=20, columns=("name",))
     tree.heading("#0", text="Option", anchor="w")
     tree.heading("name", text="Name", anchor="w")
 
@@ -573,8 +647,12 @@ def _create_kconfig_tree(parent):
     Symbol_ = Symbol
     for node in _kconf.node_iter():
         item = node.item
-        insert("", "end", iid=id_(node),
-               values=item.name if item.__class__ is Symbol_ else "")
+        insert(
+            "",
+            "end",
+            iid=id_(node),
+            values=item.name if item.__class__ is Symbol_ else "",
+        )
 
     return frame, tree
 
@@ -584,8 +662,7 @@ def _create_kconfig_desc(parent):
 
     frame = ttk.Frame(parent)
 
-    desc = Text(frame, height=12, wrap="none", borderwidth=0,
-                state="disabled")
+    desc = Text(frame, height=12, wrap="none", borderwidth=0, state="disabled")
     desc.grid(column=0, row=0, sticky="nsew")
 
     # Work around not being to Ctrl-C/V text from a disabled Text widget, with a
@@ -603,8 +680,7 @@ def _create_kconfig_desc(parent):
 def _add_vscrollbar(parent, widget):
     # Adds a vertical scrollbar to 'widget' that's only shown as needed
 
-    vscrollbar = ttk.Scrollbar(parent, orient="vertical",
-                               command=widget.yview)
+    vscrollbar = ttk.Scrollbar(parent, orient="vertical", command=widget.yview)
     vscrollbar.grid(column=1, row=0, sticky="ns")
 
     def yscrollcommand(first, last):
@@ -764,8 +840,11 @@ def _visible(node):
     # Returns True if the node should appear in the menu (outside show-all
     # mode)
 
-    return node.prompt and expr_value(node.prompt[1]) and not \
-        (node.item == MENU and not expr_value(node.visibility))
+    return (
+        node.prompt
+        and expr_value(node.prompt[1])
+        and not (node.item == MENU and not expr_value(node.visibility))
+    )
 
 
 def _add_to_tree(node, top):
@@ -782,8 +861,12 @@ def _add_to_tree(node, top):
         # show-all mode, which could look confusing/broken. Invisible symbols
         # are shown outside show-all mode if an invisible symbol has visible
         # children in an implicit menu.
-        tags=_img_tag(node) if _visible(node) or not _show_all else
-            _img_tag(node) + " invisible")
+        tags=(
+            _img_tag(node)
+            if _visible(node) or not _show_all
+            else _img_tag(node) + " invisible"
+        ),
+    )
 
 
 def _node_str(node):
@@ -801,8 +884,11 @@ def _node_str(node):
             # Print "(NEW)" next to symbols without a user value (from e.g. a
             # .config), but skip it for choice symbols in choices in y mode,
             # and for symbols of UNKNOWN type (which generate a warning though)
-            if sym.user_value is None and sym.type and not \
-                (sym.choice and sym.choice.tri_value == 2):
+            if (
+                sym.user_value is None
+                and sym.type
+                and not (sym.choice and sym.choice.tri_value == 2)
+            ):
 
                 s += " (NEW)"
 
@@ -814,7 +900,6 @@ def _node_str(node):
         # Choice without prompt. Use standard_sc_expr_str() so that it shows up
         # as '<choice (name if any)>'.
         s = standard_sc_expr_str(node.item)
-
 
     if isinstance(node.item, Symbol):
         sym = node.item
@@ -915,8 +1000,9 @@ def _in_heading(event):
     # Returns True if 'event' took place in the tree heading
 
     tree = event.widget
-    return hasattr(tree, "identify_region") and \
-        tree.identify_region(event.x, event.y) in ("heading", "separator")
+    return hasattr(tree, "identify_region") and tree.identify_region(
+        event.x, event.y
+    ) in ("heading", "separator")
 
 
 def _tree_enter(event):
@@ -986,8 +1072,12 @@ def _single_menu_mode_menu(node, tree):
     # Returns True if single-menu mode is on and 'node' is an (interface)
     # menu that can be entered
 
-    return _single_menu and tree is _tree and node.is_menuconfig and \
-           _shown_menu_nodes(node)
+    return (
+        _single_menu
+        and tree is _tree
+        and node.is_menuconfig
+        and _shown_menu_nodes(node)
+    )
 
 
 def _changeable(node):
@@ -1004,8 +1094,11 @@ def _changeable(node):
     if not (node.prompt and expr_value(node.prompt[1])):
         return False
 
-    return sc.orig_type in (STRING, INT, HEX) or len(sc.assignable) > 1 \
-           or _is_y_mode_choice_sym(sc)
+    return (
+        sc.orig_type in (STRING, INT, HEX)
+        or len(sc.assignable) > 1
+        or _is_y_mode_choice_sym(sc)
+    )
 
 
 def _tree_toggle_open(item):
@@ -1199,9 +1292,9 @@ def _set_val_dialog(node, parent):
     dialog.transient(parent)
     dialog.protocol("WM_DELETE_WINDOW", cancel)
 
-    ttk.Label(dialog, text=node.prompt[0] + ":") \
-        .grid(column=0, row=0, columnspan=2, sticky="w", padx=".3c",
-              pady=".2c .05c")
+    ttk.Label(dialog, text=node.prompt[0] + ":").grid(
+        column=0, row=0, columnspan=2, sticky="w", padx=".3c", pady=".2c .05c"
+    )
 
     entry = ttk.Entry(dialog, width=30)
     # Start with the previous value in the editbox, selected
@@ -1212,16 +1305,17 @@ def _set_val_dialog(node, parent):
 
     range_info = _range_info(sym)
     if range_info:
-        ttk.Label(dialog, text=range_info) \
-            .grid(column=0, row=2, columnspan=2, sticky="w", padx=".3c",
-                  pady=".2c 0")
+        ttk.Label(dialog, text=range_info).grid(
+            column=0, row=2, columnspan=2, sticky="w", padx=".3c", pady=".2c 0"
+        )
 
-    ttk.Button(dialog, text="OK", command=ok) \
-        .grid(column=0, row=4 if range_info else 3, sticky="e", padx=".3c",
-              pady=".4c")
+    ttk.Button(dialog, text="OK", command=ok).grid(
+        column=0, row=4 if range_info else 3, sticky="e", padx=".3c", pady=".4c"
+    )
 
-    ttk.Button(dialog, text="Cancel", command=cancel) \
-        .grid(column=1, row=4 if range_info else 3, padx="0 .3c")
+    ttk.Button(dialog, text="Cancel", command=cancel).grid(
+        column=1, row=4 if range_info else 3, padx="0 .3c"
+    )
 
     # Give all horizontal space to the grid cell with the OK button, so that
     # Cancel moves to the right
@@ -1236,6 +1330,7 @@ def _set_val_dialog(node, parent):
         _root.update_idletasks()
         entry.unbind("<Expose>")
         entry.xview_moveto(1)
+
     entry.bind("<Expose>", scroll_entry)
 
     # The dialog must be visible before we can grab the input
@@ -1269,8 +1364,8 @@ def _center_on_root(dialog):
     screen_width = _root.winfo_screenwidth()
     screen_height = _root.winfo_screenheight()
 
-    x = _root.winfo_rootx() + (_root.winfo_width() - dialog_width)//2
-    y = _root.winfo_rooty() + (_root.winfo_height() - dialog_height)//2
+    x = _root.winfo_rootx() + (_root.winfo_width() - dialog_width) // 2
+    y = _root.winfo_rooty() + (_root.winfo_height() - dialog_height) // 2
 
     # Clamp so that no part of the dialog is outside the screen
     if x + dialog_width > screen_width:
@@ -1301,9 +1396,9 @@ def _check_valid(dialog, entry, sym, s):
     except ValueError:
         messagebox.showerror(
             "Bad value",
-            "'{}' is a malformed {} value".format(
-                s, TYPE_TO_STR[sym.type]),
-            parent=dialog)
+            "'{}' is a malformed {} value".format(s, TYPE_TO_STR[sym.type]),
+            parent=dialog,
+        )
         entry.focus_set()
         return False
 
@@ -1316,7 +1411,8 @@ def _check_valid(dialog, entry, sym, s):
                 messagebox.showerror(
                     "Value out of range",
                     "{} is outside the range {}-{}".format(s, low_s, high_s),
-                    parent=dialog)
+                    parent=dialog,
+                )
                 entry.focus_set()
                 return False
 
@@ -1357,7 +1453,8 @@ def _save_as():
             title="Save configuration as",
             initialdir=os.path.dirname(filename),
             initialfile=os.path.basename(filename),
-            parent=_root)
+            parent=_root,
+        )
 
         if not filename:
             break
@@ -1381,13 +1478,13 @@ def _save_minimal():
             title="Save minimal configuration as",
             initialdir=os.path.dirname(filename),
             initialfile=os.path.basename(filename),
-            parent=_root)
+            parent=_root,
+        )
 
         if not filename:
             break
 
-        if _try_save(_kconf.write_min_config, filename,
-                     "minimal configuration"):
+        if _try_save(_kconf.write_min_config, filename, "minimal configuration"):
 
             _minconf_filename = filename
             break
@@ -1400,10 +1497,9 @@ def _open(_=None):
 
     global _conf_filename
 
-    if _conf_changed and \
-        not messagebox.askokcancel(
-            "Unsaved changes",
-            "You have unsaved changes. Load new configuration anyway?"):
+    if _conf_changed and not messagebox.askokcancel(
+        "Unsaved changes", "You have unsaved changes. Load new configuration anyway?"
+    ):
 
         return
 
@@ -1413,7 +1509,8 @@ def _open(_=None):
             title="Open configuration",
             initialdir=os.path.dirname(filename),
             initialfile=os.path.basename(filename),
-            parent=_root)
+            parent=_root,
+        )
 
         if not filename:
             break
@@ -1455,7 +1552,7 @@ def _do_showname():
     if _show_name_var.get():
         _tree["displaycolumns"] = ("name",)
         _tree["show"] = "tree headings"
-        name_width = tree_width//3
+        name_width = tree_width // 3
         _tree.column("#0", width=max(tree_width - name_width, 1))
         _tree.column("name", width=name_width)
     else:
@@ -1488,8 +1585,9 @@ def _do_showall():
     stayput = _vis_loc_ref_item()
     # Probe the middle of the first row, to play it safe. identify_row(0) seems
     # to return the row before the top row.
-    old_scroll = _item_row(stayput) - \
-        _item_row(_tree.identify_row(_treeview_rowheight//2))
+    old_scroll = _item_row(stayput) - _item_row(
+        _tree.identify_row(_treeview_rowheight // 2)
+    )
 
     _update_tree()
 
@@ -1519,8 +1617,7 @@ def _nothing_shown():
     # tree, meaning guiconfig was automatically started in
     # show-all mode, which mustn't be turned off.
 
-    return not _shown_menu_nodes(
-        _cur_menu if _single_menu else _kconf.top_node)
+    return not _shown_menu_nodes(_cur_menu if _single_menu else _kconf.top_node)
 
 
 def _toggle_tree_mode(_):
@@ -1603,8 +1700,7 @@ def _loc_ref_item():
 
     # Otherwise, use the middle item on the screen. If it doesn't exist, the
     # tree is probably really small, so use the first item in the entire tree.
-    return _tree.identify_row(_tree.winfo_height()//2) or \
-        _tree.get_children()[0]
+    return _tree.identify_row(_tree.winfo_height() // 2) or _tree.get_children()[0]
 
 
 def _vis_loc_ref_item():
@@ -1710,9 +1806,10 @@ def _try_save(save_fn, filename, description):
     except EnvironmentError as e:
         messagebox.showerror(
             "Error saving " + description,
-            "Error saving {} to '{}': {} (errno: {})"
-            .format(description, e.filename, e.strerror,
-                    errno.errorcode[e.errno]))
+            "Error saving {} to '{}': {} (errno: {})".format(
+                description, e.filename, e.strerror, errno.errorcode[e.errno]
+            ),
+        )
         return False
 
 
@@ -1731,8 +1828,10 @@ def _try_load(filename):
     except EnvironmentError as e:
         messagebox.showerror(
             "Error loading configuration",
-            "Error loading '{}': {} (errno: {})"
-            .format(filename, e.strerror, errno.errorcode[e.errno]))
+            "Error loading '{}': {} (errno: {})".format(
+                filename, e.strerror, errno.errorcode[e.errno]
+            ),
+        )
         return False
 
 
@@ -1755,8 +1854,9 @@ def _jump_to_dialog(_=None):
         # Jumps to the selected node and closes the dialog
 
         # Ignore double clicks on the image and in the heading area
-        if event and (tree.identify_element(event.x, event.y) == "image" or
-                      _in_heading(event)):
+        if event and (
+            tree.identify_element(event.x, event.y) == "image" or _in_heading(event)
+        ):
             return
 
         sel = tree.selection()
@@ -1778,17 +1878,15 @@ def _jump_to_dialog(_=None):
     def tree_select(_):
         jumpto_button["state"] = "normal" if tree.selection() else "disabled"
 
-
     dialog = Toplevel(_root)
-    dialog.geometry("+{}+{}".format(
-        _root.winfo_rootx() + 50, _root.winfo_rooty() + 50))
+    dialog.geometry("+{}+{}".format(_root.winfo_rootx() + 50, _root.winfo_rooty() + 50))
     dialog.title("Jump to symbol/choice/menu/comment")
     dialog.minsize(128, 128)  # See _create_ui()
     dialog.transient(_root)
 
-    ttk.Label(dialog, text=_JUMP_TO_HELP) \
-        .grid(column=0, row=0, columnspan=2, sticky="w", padx=".1c",
-              pady=".1c")
+    ttk.Label(dialog, text=_JUMP_TO_HELP).grid(
+        column=0, row=0, columnspan=2, sticky="w", padx=".1c", pady=".1c"
+    )
 
     entry = ttk.Entry(dialog)
     entry.grid(column=0, row=1, sticky="ew", padx=".1c", pady=".1c")
@@ -1797,8 +1895,9 @@ def _jump_to_dialog(_=None):
     entry.bind("<Return>", search)
     entry.bind("<KP_Enter>", search)
 
-    ttk.Button(dialog, text="Search", command=search) \
-        .grid(column=1, row=1, padx="0 .1c", pady="0 .1c")
+    ttk.Button(dialog, text="Search", command=search).grid(
+        column=1, row=1, padx="0 .1c", pady="0 .1c"
+    )
 
     msglabel = ttk.Label(dialog)
     msglabel.grid(column=0, row=2, sticky="w", pady="0 .1c")
@@ -1811,8 +1910,9 @@ def _jump_to_dialog(_=None):
 
     _jump_to_tree = tree
 
-    jumpto_button = ttk.Button(dialog, text="Jump to selected item",
-                               state="disabled", command=jump_to_selected)
+    jumpto_button = ttk.Button(
+        dialog, text="Jump to selected item", state="disabled", command=jump_to_selected
+    )
     jumpto_button.grid(column=0, row=4, columnspan=2, sticky="ns", pady=".1c")
 
     dialog.columnconfigure(0, weight=1)
@@ -1857,8 +1957,9 @@ def _update_jump_to_matches(msglabel, search_string):
         # faster for regexes like '.*debug$' (though the '.*' is redundant
         # there). Those probably have bad interactions with re.search(), which
         # matches anywhere in the string.
-        regex_searches = [re.compile(regex).search
-                          for regex in search_string.lower().split()]
+        regex_searches = [
+            re.compile(regex).search for regex in search_string.lower().split()
+        ]
     except re.error as e:
         msg = "Bad regular expression"
         # re.error.msg was added in Python 3.5
@@ -1882,8 +1983,12 @@ def _update_jump_to_matches(msglabel, search_string):
 
             # Does the regex match either the symbol name or the
             # prompt (if any)?
-            if not (sc.name and search(sc.name.lower()) or
-                    node.prompt and search(node.prompt[0].lower())):
+            if not (
+                sc.name
+                and search(sc.name.lower())
+                or node.prompt
+                and search(node.prompt[0].lower())
+            ):
 
                 # Give up on the first regex that doesn't match, to
                 # speed things up a bit when multiple regexes are
@@ -1923,10 +2028,11 @@ def _update_jump_to_display():
     img_tag = _img_tag
     visible = _visible
     for node in _jump_to_matches:
-        item(id_(node),
-             text=node_str(node),
-             tags=img_tag(node) if visible(node) else
-                 img_tag(node) + " invisible")
+        item(
+            id_(node),
+            text=node_str(node),
+            tags=img_tag(node) if visible(node) else img_tag(node) + " invisible",
+        )
 
     _jump_to_tree.set_children("", *map(id, _jump_to_matches))
 
@@ -1951,19 +2057,18 @@ def _sorted_sc_nodes(cached_nodes=[]):
 
     if not cached_nodes:
         # Add symbol nodes
-        for sym in sorted(_kconf.unique_defined_syms,
-                          key=lambda sym: sym.name):
+        for sym in sorted(_kconf.unique_defined_syms, key=lambda sym: sym.name):
             # += is in-place for lists
             cached_nodes += sym.nodes
 
         # Add choice nodes
 
-        choices = sorted(_kconf.unique_choices,
-                         key=lambda choice: choice.name or "")
+        choices = sorted(_kconf.unique_choices, key=lambda choice: choice.name or "")
 
         cached_nodes += sorted(
             [node for choice in choices for node in choice.nodes],
-            key=lambda node: node.prompt[0] if node.prompt else "")
+            key=lambda node: node.prompt[0] if node.prompt else "",
+        )
 
     return cached_nodes
 
@@ -1973,6 +2078,7 @@ def _sorted_menu_comment_nodes(cached_nodes=[]):
     # with the menus first
 
     if not cached_nodes:
+
         def prompt_text(mc):
             return mc.prompt[0]
 
@@ -2039,25 +2145,25 @@ def _info_str(node):
         sym = node.item
 
         return (
-            _name_info(sym) +
-            _help_info(sym) +
-            _direct_dep_info(sym) +
-            _defaults_info(sym) +
-            _select_imply_info(sym) +
-            _kconfig_def_info(sym)
+            _name_info(sym)
+            + _help_info(sym)
+            + _direct_dep_info(sym)
+            + _defaults_info(sym)
+            + _select_imply_info(sym)
+            + _kconfig_def_info(sym)
         )
 
     if isinstance(node.item, Choice):
         choice = node.item
 
         return (
-            _name_info(choice) +
-            _help_info(choice) +
-            'Mode: {}\n\n'.format(choice.str_value) +
-            _choice_syms_info(choice) +
-            _direct_dep_info(choice) +
-            _defaults_info(choice) +
-            _kconfig_def_info(choice)
+            _name_info(choice)
+            + _help_info(choice)
+            + "Mode: {}\n\n".format(choice.str_value)
+            + _choice_syms_info(choice)
+            + _direct_dep_info(choice)
+            + _defaults_info(choice)
+            + _kconfig_def_info(choice)
         )
 
     # node.item in (MENU, COMMENT)
@@ -2076,9 +2182,8 @@ def _value_info(sym):
 
     # Only put quotes around the value for string symbols
     return "Value: {}\n".format(
-        '"{}"'.format(sym.str_value)
-        if sym.orig_type == STRING
-        else sym.str_value)
+        '"{}"'.format(sym.str_value) if sym.orig_type == STRING else sym.str_value
+    )
 
 
 def _choice_syms_info(choice):
@@ -2116,10 +2221,13 @@ def _direct_dep_info(sc):
     # definition location. The dependencies at each definition location come
     # from 'depends on' and dependencies inherited from parent items.
 
-    return "" if sc.direct_dep is _kconf.y else \
-        'Direct dependencies (={}):\n{}\n' \
-        .format(TRI_TO_STR[expr_value(sc.direct_dep)],
-                _split_expr_info(sc.direct_dep, 2))
+    return (
+        ""
+        if sc.direct_dep is _kconf.y
+        else "Direct dependencies (={}):\n{}\n".format(
+            TRI_TO_STR[expr_value(sc.direct_dep)], _split_expr_info(sc.direct_dep, 2)
+        )
+    )
 
 
 def _defaults_info(sc):
@@ -2144,7 +2252,7 @@ def _defaults_info(sc):
             # This also avoids showing the tristate value for string/int/hex
             # defaults, which wouldn't make any sense.
             if isinstance(val, tuple):
-                s += '  (={})'.format(TRI_TO_STR[expr_value(val)])
+                s += "  (={})".format(TRI_TO_STR[expr_value(val)])
         else:
             # Don't print the value next to the symbol name for choice
             # defaults, as it looks a bit confusing
@@ -2152,9 +2260,9 @@ def _defaults_info(sc):
         s += "\n"
 
         if cond is not _kconf.y:
-            s += "    Condition (={}):\n{}" \
-                 .format(TRI_TO_STR[expr_value(cond)],
-                         _split_expr_info(cond, 4))
+            s += "    Condition (={}):\n{}".format(
+                TRI_TO_STR[expr_value(cond)], _split_expr_info(cond, 4)
+            )
 
     return s + "\n"
 
@@ -2177,9 +2285,7 @@ def _split_expr_info(expr, indent):
 
     s = ""
     for i, term in enumerate(split_expr(expr, split_op)):
-        s += "{}{} {}".format(indent*" ",
-                              "  " if i == 0 else op_str,
-                              _expr_str(term))
+        s += "{}{} {}".format(indent * " ", "  " if i == 0 else op_str, _expr_str(term))
 
         # Don't bother showing the value hint if the expression is just a
         # single symbol. _expr_str() already shows its value.
@@ -2210,20 +2316,20 @@ def _select_imply_info(sym):
     s = ""
 
     if sym.rev_dep is not _kconf.n:
-        s += sis(sym.rev_dep, 2,
-                 "Symbols currently y-selecting this symbol:\n")
-        s += sis(sym.rev_dep, 1,
-                 "Symbols currently m-selecting this symbol:\n")
-        s += sis(sym.rev_dep, 0,
-                 "Symbols currently n-selecting this symbol (no effect):\n")
+        s += sis(sym.rev_dep, 2, "Symbols currently y-selecting this symbol:\n")
+        s += sis(sym.rev_dep, 1, "Symbols currently m-selecting this symbol:\n")
+        s += sis(
+            sym.rev_dep, 0, "Symbols currently n-selecting this symbol (no effect):\n"
+        )
 
     if sym.weak_rev_dep is not _kconf.n:
-        s += sis(sym.weak_rev_dep, 2,
-                 "Symbols currently y-implying this symbol:\n")
-        s += sis(sym.weak_rev_dep, 1,
-                 "Symbols currently m-implying this symbol:\n")
-        s += sis(sym.weak_rev_dep, 0,
-                 "Symbols currently n-implying this symbol (no effect):\n")
+        s += sis(sym.weak_rev_dep, 2, "Symbols currently y-implying this symbol:\n")
+        s += sis(sym.weak_rev_dep, 1, "Symbols currently m-implying this symbol:\n")
+        s += sis(
+            sym.weak_rev_dep,
+            0,
+            "Symbols currently n-implying this symbol (no effect):\n",
+        )
 
     return s
 
@@ -2234,20 +2340,25 @@ def _kconfig_def_info(item):
 
     nodes = [item] if isinstance(item, MenuNode) else item.nodes
 
-    s = "Kconfig definition{}, with parent deps. propagated to 'depends on'\n" \
-        .format("s" if len(nodes) > 1 else "")
-    s += (len(s) - 1)*"="
+    s = "Kconfig definition{}, with parent deps. propagated to 'depends on'\n".format(
+        "s" if len(nodes) > 1 else ""
+    )
+    s += (len(s) - 1) * "="
 
     for node in nodes:
-        s += "\n\n" \
-             "At {}:{}\n" \
-             "{}" \
-             "Menu path: {}\n\n" \
-             "{}" \
-             .format(node.filename, node.linenr,
-                     _include_path_info(node),
-                     _menu_path_info(node),
-                     node.custom_str(_name_and_val_str))
+        s += (
+            "\n\n"
+            "At {}:{}\n"
+            "{}"
+            "Menu path: {}\n\n"
+            "{}".format(
+                node.filename,
+                node.linenr,
+                _include_path_info(node),
+                _menu_path_info(node),
+                node.custom_str(_name_and_val_str),
+            )
+        )
 
     return s
 
@@ -2258,8 +2369,10 @@ def _include_path_info(node):
         return ""
 
     return "Included via {}\n".format(
-        " -> ".join("{}:{}".format(filename, linenr)
-                    for filename, linenr in node.include_path))
+        " -> ".join(
+            "{}:{}".format(filename, linenr) for filename, linenr in node.include_path
+        )
+    )
 
 
 def _menu_path_info(node):
@@ -2273,8 +2386,11 @@ def _menu_path_info(node):
         # Promptless choices might appear among the parents. Use
         # standard_sc_expr_str() for them, so that they show up as
         # '<choice (name if any)>'.
-        path = " -> " + (node.prompt[0] if node.prompt else
-                         standard_sc_expr_str(node.item)) + path
+        path = (
+            " -> "
+            + (node.prompt[0] if node.prompt else standard_sc_expr_str(node.item))
+            + path
+        )
 
     return "(Top)" + path
 
@@ -2291,7 +2407,7 @@ def _name_and_val_str(sc):
             # Undefined symbol reference
             return "{}(undefined/n)".format(sc.name)
 
-        return '{}(={})'.format(sc.name, sc.str_value)
+        return "{}(={})".format(sc.name, sc.str_value)
 
     # For other items, use the standard format
     return standard_sc_expr_str(sc)
