@@ -1,15 +1,6 @@
 name: Test
 
-on:
-  push:
-    branches:
-    - main
-    - v*-branch
-  pull_request:
-    branches:
-    - main
-    - v*-branch
-  workflow_call:
+on: [push, pull_request]
 
 concurrency:
   group: test-${{ github.ref }}
