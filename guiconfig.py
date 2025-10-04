@@ -224,7 +224,9 @@ def menuconfig(kconf):
 
     # Select the first item and focus the Treeview, so that keyboard controls
     # work immediately
-    _select(_tree, _tree.get_children()[0])
+    children = _tree.get_children()
+    if children:
+        _select(_tree, children[0])
     _tree.focus_set()
 
     # Make geometry information available for centering the window. This
@@ -1249,15 +1251,18 @@ def _set_val(sc, val):
         # rare cases, but is fast and flicker-free.
 
         stayput = _loc_ref_item()  # Item to preserve scroll for
-        old_row = _item_row(stayput)
+        if stayput:
+            old_row = _item_row(stayput)
 
-        _update_tree()
+            _update_tree()
 
-        # If the reference item disappeared (can happen if the change was done
-        # from the jump-to dialog), then avoid messing with the scroll and hope
-        # for the best
-        if _attached(stayput):
-            _tree.yview_scroll(_item_row(stayput) - old_row, "units")
+            # If the reference item disappeared (can happen if the change was done
+            # from the jump-to dialog), then avoid messing with the scroll and hope
+            # for the best
+            if _attached(stayput):
+                _tree.yview_scroll(_item_row(stayput) - old_row, "units")
+        else:
+            _update_tree()
 
         if _jump_to_tree:
             _update_jump_to_display()
@@ -1630,7 +1635,12 @@ def _toggle_tree_mode(_):
 def _do_tree_mode():
     # Updates the UI for the current tree mode (full-tree or single-menu)
 
-    loc_ref_node = _id_to_node[_loc_ref_item()]
+    loc_ref = _loc_ref_item()
+    if not loc_ref:
+        # Tree is empty (should not happen in normal use)
+        return
+
+    loc_ref_node = _id_to_node[loc_ref]
 
     if not _single_menu:
         # _jump_to() -> _enter_menu() already updates the tree, but
@@ -1647,7 +1657,9 @@ def _enter_menu_and_select_first(menu):
     # mode.
 
     _enter_menu(menu)
-    _select(_tree, _tree.get_children()[0])
+    children = _tree.get_children()
+    if children:
+        _select(_tree, children[0])
 
 
 def _enter_menu(menu):
@@ -1700,7 +1712,11 @@ def _loc_ref_item():
 
     # Otherwise, use the middle item on the screen. If it doesn't exist, the
     # tree is probably really small, so use the first item in the entire tree.
-    return _tree.identify_row(_tree.winfo_height() // 2) or _tree.get_children()[0]
+    middle_item = _tree.identify_row(_tree.winfo_height() // 2)
+    if middle_item:
+        return middle_item
+    children = _tree.get_children()
+    return children[0] if children else None
 
 
 def _vis_loc_ref_item():
@@ -1807,7 +1823,10 @@ def _try_save(save_fn, filename, description):
         messagebox.showerror(
             "Error saving " + description,
             "Error saving {} to '{}': {} (errno: {})".format(
-                description, e.filename, e.strerror, errno.errorcode[e.errno]
+                description,
+                e.filename,
+                e.strerror,
+                errno.errorcode.get(e.errno, e.errno),
             ),
         )
         return False
@@ -1829,7 +1848,7 @@ def _try_load(filename):
         messagebox.showerror(
             "Error loading configuration",
             "Error loading '{}': {} (errno: {})".format(
-                filename, e.strerror, errno.errorcode[e.errno]
+                filename, e.strerror, errno.errorcode.get(e.errno, e.errno)
             ),
         )
         return False

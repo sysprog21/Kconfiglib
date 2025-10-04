@@ -6815,10 +6815,10 @@ def _touch_dep_file(path, sym_name):
 def _save_old(path):
     # See write_config()
 
-    def copy(src, dst):
-        # Import as needed, to save some startup time
-        import shutil
+    # Import as needed, to save some startup time
+    import shutil
 
+    def copy(src, dst):
         shutil.copyfile(src, dst)
 
     if islink(path):
@@ -6837,7 +6837,7 @@ def _save_old(path):
 
     try:
         copy_fn(path, path + ".old")
-    except Exception:
+    except (OSError, IOError, shutil.Error):
         # Ignore errors from 'path' missing as well as other errors.
         # <filename>.old file is usually more of a nice-to-have, and not worth
         # erroring out over e.g. if <filename>.old happens to be a directory or

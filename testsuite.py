@@ -3645,15 +3645,13 @@ def equal_configs():
     their = their[i:]
 
     try:
-        f = open("._config")
+        with open("._config") as f:
+            our = f.readlines()
     except EnvironmentError as e:
         if e.errno != errno.ENOENT:
             raise
         print("._config not found. Did you forget to apply the Makefile patch?")
         return False
-    else:
-        with f:
-            our = f.readlines()
 
     if their == our:
         return True
