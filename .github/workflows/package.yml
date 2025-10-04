@@ -4,11 +4,9 @@ on:
   push:
     branches:
     - main
-    - v*-branch
   pull_request:
     branches:
     - main
-    - v*-branch
   workflow_call:
 
 concurrency:

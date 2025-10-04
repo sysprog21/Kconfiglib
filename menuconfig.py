@@ -188,29 +188,9 @@ import sys
 
 _IS_WINDOWS = os.name == "nt"  # Are we running on Windows?
 
-try:
-    import curses
-except ImportError as e:
-    if not _IS_WINDOWS:
-        raise
-    sys.exit(
-        """\
-menuconfig failed to import the standard Python 'curses' library. Try
-installing a package like windows-curses
-(https://github.com/zephyrproject-rtos/windows-curses) by running this command
-in cmd.exe:
-
-    pip install windows-curses
-
-Starting with Kconfiglib 13.0.0, windows-curses is no longer automatically
-installed when installing Kconfiglib via pip on Windows (because it breaks
-installation on MSYS2).
-
-Exception:
-{}: {}""".format(
-            type(e).__name__, e
-        )
-    )
+# Defer curses import to runtime - it will be imported by _ensure_curses()
+# when menuconfig() is called. This avoids import errors in headless CI/CD
+# environments where menuconfig UI is not used.
 
 import errno
 import locale
@@ -357,29 +337,41 @@ _STYLES = {
     """,
 }
 
-_NAMED_COLORS = {
-    # Basic colors
-    "black": curses.COLOR_BLACK,
-    "red": curses.COLOR_RED,
-    "green": curses.COLOR_GREEN,
-    "yellow": curses.COLOR_YELLOW,
-    "blue": curses.COLOR_BLUE,
-    "magenta": curses.COLOR_MAGENTA,
-    "cyan": curses.COLOR_CYAN,
-    "white": curses.COLOR_WHITE,
-    # Bright versions
-    "brightblack": curses.COLOR_BLACK + 8,
-    "brightred": curses.COLOR_RED + 8,
-    "brightgreen": curses.COLOR_GREEN + 8,
-    "brightyellow": curses.COLOR_YELLOW + 8,
-    "brightblue": curses.COLOR_BLUE + 8,
-    "brightmagenta": curses.COLOR_MAGENTA + 8,
-    "brightcyan": curses.COLOR_CYAN + 8,
-    "brightwhite": curses.COLOR_WHITE + 8,
-    # Aliases
-    "purple": curses.COLOR_MAGENTA,
-    "brightpurple": curses.COLOR_MAGENTA + 8,
-}
+# Curses module - will be imported by _ensure_curses()
+curses = None
+
+# Named colors cache - will be initialized by _get_named_colors()
+_named_colors_cache = None
+
+
+def _get_named_colors():
+    """Returns the named colors dictionary. Initializes it on first call."""
+    global _named_colors_cache
+    if _named_colors_cache is None:
+        _named_colors_cache = {
+            # Basic colors
+            "black": curses.COLOR_BLACK,
+            "red": curses.COLOR_RED,
+            "green": curses.COLOR_GREEN,
+            "yellow": curses.COLOR_YELLOW,
+            "blue": curses.COLOR_BLUE,
+            "magenta": curses.COLOR_MAGENTA,
+            "cyan": curses.COLOR_CYAN,
+            "white": curses.COLOR_WHITE,
+            # Bright versions
+            "brightblack": curses.COLOR_BLACK + 8,
+            "brightred": curses.COLOR_RED + 8,
+            "brightgreen": curses.COLOR_GREEN + 8,
+            "brightyellow": curses.COLOR_YELLOW + 8,
+            "brightblue": curses.COLOR_BLUE + 8,
+            "brightmagenta": curses.COLOR_MAGENTA + 8,
+            "brightcyan": curses.COLOR_CYAN + 8,
+            "brightwhite": curses.COLOR_WHITE + 8,
+            # Aliases
+            "purple": curses.COLOR_MAGENTA,
+            "brightpurple": curses.COLOR_MAGENTA + 8,
+        }
+    return _named_colors_cache
 
 
 def _rgb_to_6cube(rgb):
@@ -594,8 +586,9 @@ def _style_to_curses(style_def):
                 )
             )
 
-        if color_def in _NAMED_COLORS:
-            color_num = _color_from_num(_NAMED_COLORS[color_def])
+        named_colors = _get_named_colors()
+        if color_def in named_colors:
+            color_num = _color_from_num(named_colors[color_def])
         else:
             try:
                 color_num = _color_from_num(int(color_def, 0))
@@ -695,6 +688,43 @@ def _style_attr(fg_color, bg_color, attribs, color_attribs={}):
 #
 
 
+def _ensure_curses():
+    """
+    Imports curses module if not already imported. This allows the module
+    to be imported in headless CI/CD environments without triggering import
+    errors, as long as menuconfig() is not called.
+    """
+    global curses
+    if curses is not None:
+        return
+
+    try:
+        import curses as curses_module
+
+        curses = curses_module
+    except ImportError as e:
+        if not _IS_WINDOWS:
+            raise
+        sys.exit(
+            """\
+menuconfig failed to import the standard Python 'curses' library. Try
+installing a package like windows-curses
+(https://github.com/zephyrproject-rtos/windows-curses) by running this command
+in cmd.exe:
+
+    pip install windows-curses
+
+Starting with Kconfiglib 13.0.0, windows-curses is no longer automatically
+installed when installing Kconfiglib via pip on Windows (because it breaks
+installation on MSYS2).
+
+Exception:
+{}: {}""".format(
+                type(e).__name__, e
+            )
+        )
+
+
 def _main():
     menuconfig(standard_kconfig(__doc__))
 
@@ -706,6 +736,9 @@ def menuconfig(kconf):
     kconf:
       Kconfig instance to be configured
     """
+    # Import curses at runtime to avoid issues in headless environments
+    _ensure_curses()
+
     global _kconf
     global _conf_filename
     global _conf_changed
