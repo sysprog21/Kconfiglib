@@ -36,7 +36,7 @@ jobs:
           builder: ubuntu-24.04
         - python: '3.12'
           os: macOS
-          builder: macos-14
+          builder: macos-15
         # - python: '3.12'
         #   os: Windows
         #   builder: windows-2022
@@ -51,7 +51,7 @@ jobs:
         fi
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.target.python }}
 
@@ -67,7 +67,7 @@ jobs:
         pip install --user setuptools wheel
 
     - name: Check out Linux source code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       # On Windows, checkout of 'aux.c' is expected to fail because ... Windows.
       continue-on-error: true
       with:
@@ -75,7 +75,7 @@ jobs:
         ref: v5.4
 
     - name: Check out Kconfiglib source code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         path: Kconfiglib
 
