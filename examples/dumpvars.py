@@ -11,5 +11,9 @@ import sys
 import kconfiglib
 
 
-print(" ".join("{}='{}'".format(var, os.environ[var])
-               for var in kconfiglib.Kconfig(sys.argv[1]).env_vars))
+print(
+    " ".join(
+        "{}='{}'".format(var, os.environ[var])
+        for var in kconfiglib.Kconfig(sys.argv[1]).env_vars
+    )
+)

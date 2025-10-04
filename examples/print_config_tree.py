@@ -53,10 +53,19 @@
 
 import sys
 
-from kconfiglib import Kconfig, \
-                       Symbol, MENU, COMMENT, \
-                       BOOL, TRISTATE, STRING, INT, HEX, UNKNOWN, \
-                       expr_value
+from kconfiglib import (
+    Kconfig,
+    Symbol,
+    MENU,
+    COMMENT,
+    BOOL,
+    TRISTATE,
+    STRING,
+    INT,
+    HEX,
+    UNKNOWN,
+    expr_value,
+)
 
 
 # Add help description to output
@@ -64,7 +73,7 @@ WITH_HELP_DESC = False
 
 
 def indent_print(s, indent):
-    print(indent*" " + s)
+    print(indent * " " + s)
 
 
 def value_str(sc):
@@ -141,7 +150,7 @@ def node_str(node):
 
     # Add help text
     if WITH_HELP_DESC:
-        prompt += ' - ' + str(node.help).replace('\n', ' ').replace('\r', '')
+        prompt += " - " + str(node.help).replace("\n", " ").replace("\r", "")
 
     # {:3} sets the field width to three. Gives nice alignment for empty string
     # values.
@@ -189,7 +198,7 @@ if __name__ == "__main__":
 
     # Set default .config file or load it from argv
     if len(sys.argv) == 2:
-        config_filename = '.config'
+        config_filename = ".config"
     else:
         config_filename = sys.argv[2]
 

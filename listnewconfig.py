@@ -21,20 +21,20 @@ from kconfiglib import Kconfig, BOOL, TRISTATE, INT, HEX, STRING, TRI_TO_STR
 
 def main():
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=__doc__)
+        formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__
+    )
 
     parser.add_argument(
-        "--show-help", "-l",
-        action="store_true",
-        help="Show any help texts as well")
+        "--show-help", "-l", action="store_true", help="Show any help texts as well"
+    )
 
     parser.add_argument(
         "kconfig",
         metavar="KCONFIG",
         nargs="?",
         default="Kconfig",
-        help="Top-level Kconfig file (default: Kconfig)")
+        help="Top-level Kconfig file (default: Kconfig)",
+    )
 
     args = parser.parse_args()
 
@@ -47,17 +47,18 @@ def main():
         # case in that sym.assignable will be (2,) (length 1) for visible
         # symbols in choices in y mode, but they can still be toggled by
         # selecting some other symbol.
-        if sym.user_value is None and \
-           (len(sym.assignable) > 1 or
-            (sym.visibility and (sym.orig_type in (INT, HEX, STRING) or
-                                 sym.choice))):
+        if sym.user_value is None and (
+            len(sym.assignable) > 1
+            or (sym.visibility and (sym.orig_type in (INT, HEX, STRING) or sym.choice))
+        ):
 
             # Don't reuse the 'config_string' format for bool/tristate symbols,
             # to show n-valued symbols as 'CONFIG_FOO=n' instead of
             # '# CONFIG_FOO is not set'. This matches the C tools.
             if sym.orig_type in (BOOL, TRISTATE):
-                s = "{}{}={}\n".format(kconf.config_prefix, sym.name,
-                                       TRI_TO_STR[sym.tri_value])
+                s = "{}{}={}\n".format(
+                    kconf.config_prefix, sym.name, TRI_TO_STR[sym.tri_value]
+                )
             else:
                 s = sym.config_string
 
@@ -67,8 +68,7 @@ def main():
                     if node.help is not None:
                         # Indent by two spaces. textwrap.indent() is not
                         # available in Python 2 (it's 3.3+).
-                        print("\n".join("  " + line
-                                        for line in node.help.split("\n")))
+                        print("\n".join("  " + line for line in node.help.split("\n")))
                         break
 
 

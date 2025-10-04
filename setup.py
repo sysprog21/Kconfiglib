@@ -9,23 +9,19 @@ setuptools.setup(
     # MAJOR.MINOR.PATCH, per http://semver.org
     version="14.1.1a4",
     description="A flexible Python Kconfig implementation",
-
     # Make sure that README.md decodes on Python 3 in environments that use
     # the C locale (which implies ASCII), by explicitly giving the encoding.
     #
     # io.open() has the 'encoding' parameter on both Python 2 and 3. open()
     # doesn't have it on Python 2. This lets us use the same code for both.
     long_description=io.open(
-        os.path.join(os.path.dirname(__file__), "README.md"),
-        encoding="utf-8"
+        os.path.join(os.path.dirname(__file__), "README.md"), encoding="utf-8"
     ).read(),
-
     url="https://github.com/sysprog21/Kconfiglib",
-    author='Zephyr Project',
+    author="Zephyr Project",
     author_email="ci@zephyrproject.org",
     keywords="kconfig, kbuild, menuconfig, configuration-management",
     license="ISC",
-
     py_modules=(
         "kconfiglib",
         "menuconfig",
@@ -42,7 +38,6 @@ setuptools.setup(
         "listnewconfig",
         "setconfig",
     ),
-
     entry_points={
         "console_scripts": (
             "menuconfig = menuconfig:_main",
@@ -60,18 +55,14 @@ setuptools.setup(
             "setconfig = setconfig:main",
         )
     },
-
     # Note: windows-curses is not automatically installed on Windows anymore,
     # because it made Kconfiglib impossible to install on MSYS2 with pip
-
     # Needs support for unnumbered {} in format() and argparse
     python_requires=">=2.7,!=3.0.*,!=3.1.*",
-
     project_urls={
         "GitHub repository": "https://github.com/sysprog21/Kconfiglib",
         "Examples": "https://github.com/sysprog21/Kconfiglib/tree/main/examples",
     },
-
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
@@ -96,5 +87,5 @@ setuptools.setup(
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
-    ]
+    ],
 )

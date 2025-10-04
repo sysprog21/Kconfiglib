@@ -91,8 +91,7 @@ def all_arch_srcarch_kconfigs():
         os.environ["SRCARCH"] = srcarch
 
         # um (User Mode Linux) uses a different base Kconfig file
-        yield Kconfig("Kconfig" if arch != "um" else "arch/x86/um/Kconfig",
-                      warn=False)
+        yield Kconfig("Kconfig" if arch != "um" else "arch/x86/um/Kconfig", warn=False)
 
 
 print("Registering defined and undefined symbols for all arches")
@@ -122,6 +121,7 @@ for kconf in all_arch_srcarch_kconfigs():
 
 print("\nFinding references to each undefined symbol")
 
+
 def referencing_nodes(kconf, name):
     # Returns a list of all menu nodes that reference a symbol named 'name' in
     # any of their properties or property conditions
@@ -148,9 +148,11 @@ for kconf in all_arch_srcarch_kconfigs():
             refs.add("{}:{}".format(node.filename, node.linenr))
 
 
-print("\nThe following globally undefined symbols were found, listed here\n"
-      "together with the locations of the items that reference them.\n"
-      "References might come from enclosing menus and ifs.\n")
+print(
+    "\nThe following globally undefined symbols were found, listed here\n"
+    "together with the locations of the items that reference them.\n"
+    "References might come from enclosing menus and ifs.\n"
+)
 
 for name, refs in undef_sym_refs:
     print("  {}: {}".format(name, ", ".join(refs)))
