@@ -411,15 +411,6 @@ Three configuration interfaces are currently available:
 
   The included images might not be the most artistic. Touch-ups are welcome.
 
-- [pymenuconfig](https://github.com/RomaVis/pymenuconfig), created by [RomaVis](https://github.com/RomaVis),
-  is an older, portable Python 2/3 Tkinter menuconfig implementation.
-
-  Screenshot below:
-  ![image](https://raw.githubusercontent.com/RomaVis/pymenuconfig/master/screenshot.PNG)
-
-  While working on the terminal menuconfig implementation, a few APIs were added to Kconfiglib that turned out to be handy.
-  `pymenuconfig` predates `menuconfig.py` and `guiconfig.py` and therefore did not benefit from these APIs.
-
 ## Examples
 
 ### Example scripts
@@ -599,11 +590,6 @@ Adding multiprocessing to the test suite could help reduce this overhead.
   the maintainers are happy to include it upstream—batteries included and all that.
   To contribute, please [open an issue](https://github.com/sysprog21/Kconfiglib/issues) or
   [submit a pull request](https://github.com/sysprog21/Kconfiglib/pulls).
-
-- Kconfiglib assumes the modules symbol is `MODULES`, which is backward-compatible.
-  A warning is printed by default if `option modules` is set on a different symbol.
-  Report [issues on GitHub](https://github.com/sysprog21/Kconfiglib/issues) if proper `option modules` support is needed.
-  It would not be hard to add.
 
 ## Thanks
 
