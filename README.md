@@ -399,10 +399,6 @@ Three configuration interfaces are currently available:
     ```shell
     sudo pacman -S tk
     ```
-  - Clear Linux:
-    ```shell
-    sudo swupd bundle-add python3-tcl
-    ```
   - macOS:
     ```shell
     brew install python-tk
