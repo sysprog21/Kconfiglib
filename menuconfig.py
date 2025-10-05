@@ -3453,9 +3453,26 @@ def _value_info(sym):
     # Returns a string showing 'sym's value
 
     # Only put quotes around the value for string symbols
-    return "Value: {}\n".format(
+    s = "Value: {}\n".format(
         '"{}"'.format(sym.str_value) if sym.orig_type == STRING else sym.str_value
     )
+
+    # Add origin information to explain where the value comes from
+    origin = sym.origin
+    if origin:
+        kind, sources = origin
+        if kind == "select":
+            if sources:
+                s += "  (selected by: {})\n".format(", ".join(sources))
+        elif kind == "imply":
+            if sources:
+                s += "  (implied by: {})\n".format(", ".join(sources))
+        elif kind == "default":
+            s += "  (from default)\n"
+        elif kind == "assign":
+            s += "  (user assigned)\n"
+
+    return s
 
 
 def _choice_syms_info(choice):
@@ -3818,6 +3835,68 @@ def _error(text):
     _msg("Error", text)
 
 
+def _get_force_info(sym):
+    # Returns a string indicating what's forcing a symbol's value, or None
+    # if the value is not being forced by select/imply.
+    #
+    # Example return values:
+    #   " [selected by FOO]"
+    #   " [implied by BAR, BAZ]"
+
+    if sym.orig_type not in (BOOL, TRISTATE):
+        return None
+
+    origin = sym.origin
+    if not origin:
+        return None
+
+    kind, sources = origin
+    if kind not in ("select", "imply") or not sources:
+        return None
+
+    # Format the force info string
+    prefix = "selected by" if kind == "select" else "implied by"
+    sym_names = _extract_controlling_symbols(sources)
+
+    if not sym_names:
+        return None
+
+    # Show up to 2 symbols to keep line length reasonable
+    if len(sym_names) <= 2:
+        return " [{} {}]".format(prefix, ", ".join(sym_names))
+
+    return " [{} {}, +{}]".format(prefix, ", ".join(sym_names[:2]), len(sym_names) - 2)
+
+
+def _extract_controlling_symbols(expr_list):
+    # Extracts the primary controlling symbol from each expression string
+    # Returns a list of unique symbol names
+    #
+    # For "A && B", extracts "A" (the symbol doing the select/imply)
+    # For "A || B", extracts both "A" and "B"
+    # For simple "A", extracts "A"
+    #
+    # This avoids showing condition symbols as if they're doing the select/imply
+
+    sym_names = []
+    for expr in expr_list:
+        # Split on && first - we only want symbols before &&
+        # For "FOO && BAR", we want FOO (the selector), not BAR (the condition)
+        and_idx = expr.find(" && ")
+        primary = expr[:and_idx].strip() if and_idx != -1 else expr.strip()
+
+        # Now handle || - all parts are equal
+        if " || " in primary:
+            for part in primary.split(" || "):
+                part = part.strip()
+                if part and part not in sym_names:
+                    sym_names.append(part)
+        elif primary and primary not in sym_names:
+            sym_names.append(primary)
+
+    return sym_names
+
+
 def _node_str(node):
     # Returns the complete menu entry text for a menu node.
     #
@@ -3862,6 +3941,11 @@ def _node_str(node):
             ):
 
                 s += " (NEW)"
+
+            # Show what's controlling this symbol if it's selected/implied
+            force_info = _get_force_info(sym)
+            if force_info:
+                s += force_info
 
     if isinstance(node.item, Choice) and node.item.tri_value == 2:
         # Print the prompt of the selected symbol after the choice for
