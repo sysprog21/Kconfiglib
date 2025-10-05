@@ -810,13 +810,13 @@ def menuconfig(kconf):
 def _load_config():
     # Loads any existing .config file. See the Kconfig.load_config() docstring.
     #
-    # Returns True if .config is missing or outdated. We always prompt for
-    # saving the configuration in that case.
+    # Returns True if .config exists and is outdated. We prompt for saving the
+    # configuration only if there are actual changes.
 
     print(_kconf.load_config())
     if not os.path.exists(_conf_filename):
-        # No .config
-        return True
+        # No .config - no changes yet
+        return False
 
     return _needs_save()
 
