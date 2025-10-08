@@ -804,7 +804,49 @@ def menuconfig(kconf):
 
     # Enter curses mode. _menuconfig() returns a string to print on exit, after
     # curses has been de-initialized.
-    print(curses.wrapper(_menuconfig))
+    print(_wrapper(_menuconfig))
+
+
+def _wrapper(func):
+    # Workaround for windows-curses bug on Python 3.12+
+    # See: https://github.com/zephyrproject-rtos/windows-curses/issues/50
+    if os.name == "nt" and sys.version_info >= (3, 12):
+        stdscr = None
+        try:
+            import _curses
+        except ImportError:
+            # _curses not available, fall back to standard wrapper
+            return curses.wrapper(func)
+
+        try:
+            # setupterm() crashes on Python 3.12 with windows-curses
+            stdscr = _curses.initscr()
+
+            # Copy ACS_* and LINES/COLS to curses module
+            for key, value in _curses.__dict__.items():
+                if key.startswith("ACS_") or key in ("LINES", "COLS"):
+                    setattr(curses, key, value)
+
+            curses.noecho()
+            curses.cbreak()
+
+            try:
+                curses.start_color()
+            except curses.error:
+                # Color support not available
+                pass
+
+            if stdscr is not None:
+                stdscr.keypad(True)
+                return func(stdscr)
+        finally:
+            if stdscr is not None:
+                stdscr.keypad(False)
+            curses.echo()
+            curses.nocbreak()
+            curses.endwin()
+    else:
+        return curses.wrapper(func)
 
 
 def _load_config():
