@@ -729,15 +729,22 @@ def _main():
     menuconfig(standard_kconfig(__doc__))
 
 
-def menuconfig(kconf):
+def menuconfig(kconf, headless=False):
     """
     Launches the configuration interface, returning after the user exits.
 
     kconf:
       Kconfig instance to be configured
+
+    headless:
+      If True, run in headless mode without launching the terminal interface.
+      This is useful for testing, CI/CD pipelines, and automated configuration
+      processing. In headless mode, the function only loads the configuration
+      and returns immediately without user interaction.
     """
     # Import curses at runtime to avoid issues in headless environments
-    _ensure_curses()
+    if not headless:
+        _ensure_curses()
 
     global _kconf
     global _conf_filename
@@ -784,6 +791,10 @@ def menuconfig(kconf):
     # Try to fix Unicode issues on systems with bad defaults
     if _CHANGE_C_LC_CTYPE_TO_UTF8:
         _change_c_lc_ctype_to_utf8()
+
+    # In headless mode, just load the configuration and return
+    if headless:
+        return
 
     # Get rid of the delay between pressing ESC and jumping to the parent menu,
     # unless the user has set ESCDELAY (see ncurses(3)). This makes the UI much
