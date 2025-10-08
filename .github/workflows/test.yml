@@ -92,15 +92,14 @@ jobs:
       # Use root dir for Windows, Kconfiglib subdir for Linux/macOS
       working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
       run: |
-        python -c "
+        python << 'EOF'
         from kconfiglib import Kconfig
         import menuconfig
-
         print('Testing headless mode...')
         kconf = Kconfig('examples/Kmenuconfig')
         menuconfig.menuconfig(kconf, headless=True)
-        print('✅ Headless mode test passed')
-        "
+        print('Headless mode test passed')
+        EOF
 
     - name: Install windows-curses (Windows only)
       if: matrix.target.os == 'Windows'
@@ -112,4 +111,4 @@ jobs:
       # Use root dir for Windows (headless-only mode)
       working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
       run: |
-        python -c "import menuconfig; print('✅ menuconfig import successful')"
+        python -c "import menuconfig; print('menuconfig import successful')"
