@@ -25,6 +25,7 @@ available:
   Ctrl-A   : Toggle show-all mode
   Ctrl-N   : Toggle show-name mode
   Ctrl-M   : Toggle single-menu mode
+  Ctrl-T   : Toggle dark/light theme
   Ctrl-F, /: Open jump-to dialog
   ESC      : Close
 
@@ -102,12 +103,190 @@ from kconfiglib import (
 _USE_EMBEDDED_IMAGES = True
 
 
+# Blue Theme Colors - Light Mode
+CUSTOMTKINTER_LIGHT = {
+    "bg_primary": "#F9F9FA",
+    "bg_secondary": "#EBEBEC",
+    "bg_input": "#FFFFFF",
+    "fg_primary": "#1A1A1A",
+    "fg_secondary": "#4A4A4A",
+    "accent_primary": "#3B8ED0",
+    "accent_hover": "#36719F",
+    "accent_active": "#1F6AA5",
+    "button_bg": "#E0E0E0",
+    "button_fg": "#1A1A1A",
+    "button_active_bg": "#C0C0C0",
+    "tree_bg": "#FFFFFF",
+    "tree_select": "#3B8ED0",
+    "tree_select_fg": "#FFFFFF",
+    "tree_oddrow": "#F9F9FA",
+    "tree_evenrow": "#FFFFFF",
+}
+
+# Blue Theme Colors - Dark Mode
+CUSTOMTKINTER_DARK = {
+    "bg_primary": "#2B2B2B",
+    "bg_secondary": "#1D1E1E",
+    "bg_input": "#343638",
+    "fg_primary": "#DCE4EE",
+    "fg_secondary": "#B0B0B0",
+    "accent_primary": "#1F6AA5",
+    "accent_hover": "#144870",
+    "accent_active": "#0C3150",
+    "button_bg": "#404040",
+    "button_fg": "#FFFFFF",
+    "button_active_bg": "#505050",
+    "tree_bg": "#2B2B2B",
+    "tree_select": "#1F6AA5",
+    "tree_select_fg": "#FFFFFF",
+    "tree_oddrow": "#2B2B2B",
+    "tree_evenrow": "#323232",
+}
+
+
 # Help text for the jump-to dialog
 _JUMP_TO_HELP = """\
 Type to search - results update as you type. Supports multiple strings/regexes
 (space-separated) that must all match. Python's regex flavor is used (see 're'
 module). Double-click an item to jump to it. Values can be toggled within the dialog.\
 """
+
+
+class ThemeManager:
+    """
+    Manages dark/light theme switching for guiconfig.
+    Uses hybrid approach: tk.Label for text (full color control) + ttk widgets for native look.
+    Compatible with macOS aqua theme.
+    """
+
+    def __init__(self, root):
+        self.root = root
+        self.current_theme = "light"
+        self.colors = CUSTOMTKINTER_LIGHT
+
+        # Force use of 'clam' theme for consistent color control across platforms
+        # clam theme properly supports ttk widget styling unlike aqua theme
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+
+    def toggle(self):
+        """Toggle between light and dark themes"""
+        self.current_theme = "dark" if self.current_theme == "light" else "light"
+        self.colors = (
+            CUSTOMTKINTER_DARK if self.current_theme == "dark" else CUSTOMTKINTER_LIGHT
+        )
+        self.apply()
+
+    def set_theme(self, theme_name):
+        """Set specific theme: 'light' or 'dark'"""
+        self.current_theme = theme_name
+        self.colors = (
+            CUSTOMTKINTER_DARK if theme_name == "dark" else CUSTOMTKINTER_LIGHT
+        )
+        self.apply()
+
+    def apply(self):
+        """Apply current theme to all widgets recursively"""
+        c = self.colors
+
+        # Update root window
+        self.root.configure(bg=c["bg_primary"])
+
+        # Use Tk option database to set default colors (works better than ttk styles on macOS)
+        self.root.option_add("*background", c["bg_primary"])
+        self.root.option_add("*foreground", c["fg_primary"])
+        self.root.option_add("*Frame.background", c["bg_primary"])
+        self.root.option_add("*Labelframe.background", c["bg_primary"])
+        self.root.option_add("*Label.background", c["bg_primary"])
+        self.root.option_add("*Label.foreground", c["fg_primary"])
+
+        # Update ttk styles first
+        style = ttk.Style()
+
+        # Standard ttk styles
+        style.configure("TFrame", background=c["bg_primary"])
+        style.configure(
+            "TLabelframe",
+            background=c["bg_primary"],
+            bordercolor=c["bg_primary"],
+            darkcolor=c["bg_primary"],
+            lightcolor=c["bg_primary"],
+        )
+        style.configure(
+            "TLabelframe.Label", background=c["bg_primary"], foreground=c["fg_primary"]
+        )
+        style.configure(
+            "TButton",
+            background=c["button_bg"],
+            foreground=c["button_fg"],
+            bordercolor=c["bg_primary"],
+            darkcolor=c["button_bg"],
+            lightcolor=c["button_bg"],
+            borderwidth=1,
+            focuscolor=c["button_bg"],
+        )
+        style.map(
+            "TButton",
+            background=[
+                ("active", c["button_active_bg"]),
+                ("pressed", c["button_active_bg"]),
+            ],
+            foreground=[("active", c["button_fg"]), ("pressed", c["button_fg"])],
+            bordercolor=[("active", c["bg_primary"]), ("pressed", c["bg_primary"])],
+            darkcolor=[
+                ("active", c["button_active_bg"]),
+                ("pressed", c["button_active_bg"]),
+            ],
+            lightcolor=[
+                ("active", c["button_active_bg"]),
+                ("pressed", c["button_active_bg"]),
+            ],
+        )
+        style.configure(
+            "TLabel", background=c["bg_primary"], foreground=c["fg_primary"]
+        )
+        style.configure(
+            "TCheckbutton", background=c["bg_primary"], foreground=c["fg_primary"]
+        )
+
+        # Custom styles for widgets that don't respond to standard styles in aqua theme
+        style.configure("Custom.TFrame", background=c["bg_primary"])
+        style.configure(
+            "Custom.TLabel", background=c["bg_primary"], foreground=c["fg_primary"]
+        )
+
+        # Treeview styling (works well even in aqua)
+        style.configure(
+            "Treeview",
+            background=c["tree_bg"],
+            foreground=c["fg_primary"],
+            fieldbackground=c["tree_bg"],
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", c["tree_select"])],
+            foreground=[("selected", c["tree_select_fg"])],
+        )
+
+        # Entry styling
+        style.configure(
+            "TEntry", fieldbackground=c["bg_input"], foreground=c["fg_primary"]
+        )
+
+        # Panedwindow styling
+        style.configure("TPanedwindow", background=c["bg_primary"])
+
+        # Update tree row colors
+        global _tree
+        if _tree:
+            _tree.tag_configure("oddrow", background=c["tree_oddrow"])
+            _tree.tag_configure("evenrow", background=c["tree_evenrow"])
+
+        # Update description Text widget colors
+        global _desc_text
+        if _desc_text:
+            _desc_text.configure(bg=c["tree_bg"], fg=c["fg_primary"])
 
 
 def _main():
@@ -118,6 +297,9 @@ def _main():
 #
 #   _root:
 #     The Toplevel instance for the main window
+#
+#   _theme_manager:
+#     ThemeManager instance for handling dark/light theme switching
 #
 #   _tree:
 #     The Treeview in the main window
@@ -134,6 +316,9 @@ def _main():
 #
 #   _backbutton:
 #     The button shown in single-menu mode for jumping to the parent menu
+#
+#   _theme_button:
+#     Button for toggling between light and dark themes
 #
 #   _status_label:
 #     Label with status text shown at the bottom of the main window
@@ -187,6 +372,7 @@ def menuconfig(kconf):
     global _cur_menu
     global _tree_row_index
     global _search_after_id
+    global _theme_manager
 
     _kconf = kconf
 
@@ -312,10 +498,14 @@ def _create_ui():
 
     global _root
     global _tree
+    global _theme_manager
 
     # Create the root window. This initializes Tkinter and makes e.g.
     # PhotoImage available, so do it early.
     _root = Tk()
+
+    # Initialize theme manager early
+    _theme_manager = ThemeManager(_root)
 
     _load_images()
     _init_misc_ui()
@@ -349,8 +539,12 @@ def _create_ui():
     _root.bind("<Control-n>", _toggle_showname)
     _root.bind("<Control-m>", _toggle_tree_mode)
     _root.bind("<Control-f>", _jump_to_dialog)
+    _root.bind("<Control-t>", _toggle_theme)
     _root.bind("/", _jump_to_dialog)
     _root.bind("<Escape>", _on_quit)
+
+    # Apply initial theme (light mode by default) after all widgets are created
+    _theme_manager.apply()
 
 
 def _load_images():
@@ -379,7 +573,7 @@ def _load_images():
 
     load_image(
         "icon",
-        "R0lGODlhMAAwAPEDAAAAAADQAO7u7v///yH5BAUKAAMALAAAAAAwADAAAAL/nI+gy+2Pokyv2jazuZxryQjiSJZmyXxHeLbumH6sEATvW8OLNtf5bfLZRLFITzgEipDJ4mYxYv6A0ubuqYhWk66tVTE4enHer7jcKvt0LLUw6P45lvEprT6c0+v7OBuqhYdHohcoqIbSAHc4ljhDwrh1UlgSydRCWWlp5wiYZvmSuSh4IzrqV6p4cwhkCsmY+nhK6uJ6t1mrOhuJqfu6+WYiCiwl7HtLjNSZZZis/MeM7NY3TaRKS40ooDeoiVqIultsrav92bi9c3a5KkkOsOJZpSS99m4k/0zPng4Gks9JSbB+8DIcoQfnjwpZCHv5W+ip4aQrKrB0uOikYhiMCBw1/uPoQUMBADs=",
+        "R0lGODlhMAAwAIEAAAAAADuO0AAAAAAAACH5BAkAAAAALAAAAAAwADAAQAjfAAEIHEiwYICCCBEeTMiwIYAAECNKnEhRokOBFTNCvIhRY0WCHjk2DDnQ40eOJimiTJlS5EqWKl0qhEkz4kWTMkGSNLgzJ06HNYPm5Bl041CgRm8mPZqwqE2mJZ1q9MmyaVWGV2VmjZoR6sOpM7tC7dnxp9aWWLdyNStSKlivbr1aXaiUrlydZ++GtTuX7924er8Chut2ItPCb18iTly2Zl2ajdk+lizZZWXBJw8zjmx47GbMMTWLJZr5KFnOnYdShnm2qtPJalEvtmh5dmqqs/8WDgzaMW/Mj393zCsyIAA7",
     )
     load_image(
         "n_bool",
@@ -527,6 +721,23 @@ def _create_menubar():
         command=_do_tree_mode,
     )
 
+    # Theme menu
+    theme_menu = Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="Theme", menu=theme_menu)
+    theme_menu.add_command(
+        label="Light Mode",
+        command=lambda: (_theme_manager.set_theme("light"), _update_tree()),
+    )
+    theme_menu.add_command(
+        label="Dark Mode",
+        command=lambda: (_theme_manager.set_theme("dark"), _update_tree()),
+    )
+    theme_menu.add_separator()
+    theme_menu.add_command(
+        label="Toggle (Ctrl+T)",
+        command=lambda: (_theme_manager.toggle(), _update_tree()),
+    )
+
 
 def _create_top_widgets():
     # Creates the controls above the Kconfig tree in the main window
@@ -543,56 +754,90 @@ def _create_top_widgets():
     _show_all_var = BooleanVar()
     _single_menu_var = BooleanVar()
 
-    topframe = ttk.Frame(_root)
+    # Use tk.Frame instead of ttk.Frame for better color control on macOS
+    topframe = Frame(_root, bg=_theme_manager.colors["bg_primary"])
     topframe.grid(column=0, row=0, sticky="ew", padx=".1c", pady=".1c")
+    # Configure topframe columns to expand properly
+    topframe.columnconfigure(0, weight=1)
+    topframe.columnconfigure(1, weight=0)
+    topframe.columnconfigure(2, weight=0)
 
     # Create button groups with separators
     # File operations group
-    file_group = ttk.LabelFrame(topframe, text="File Operations", padding="5")
+    file_group = ttk.LabelFrame(topframe, text="File Operations")
     file_group.grid(column=0, row=0, sticky="ew", padx="0 .1c")
 
-    ttk.Button(file_group, text="Save", command=_save, width=12).grid(
+    # Create inner frame for consistent background
+    file_inner = ttk.Frame(file_group)
+    file_inner.pack(fill="both", expand=True, padx=5, pady=5)
+
+    # Configure column weights for responsive layout
+    file_inner.columnconfigure(0, weight=1)
+    file_inner.columnconfigure(1, weight=1)
+    file_inner.columnconfigure(2, weight=1)
+    file_inner.columnconfigure(3, weight=1)
+
+    ttk.Button(file_inner, text="Save", command=_save).grid(
         column=0, row=0, sticky="ew", padx="2", pady="2"
     )
 
-    ttk.Button(file_group, text="Save as...", command=_save_as, width=12).grid(
+    ttk.Button(file_inner, text="Save as...", command=_save_as).grid(
         column=1, row=0, sticky="ew", padx="2", pady="2"
     )
 
-    ttk.Button(
-        file_group, text="Save minimal...", command=_save_minimal, width=12
-    ).grid(column=2, row=0, sticky="ew", padx="2", pady="2")
+    ttk.Button(file_inner, text="Save minimal...", command=_save_minimal).grid(
+        column=2, row=0, sticky="ew", padx="2", pady="2"
+    )
 
-    ttk.Button(file_group, text="Open...", command=_open, width=12).grid(
+    ttk.Button(file_inner, text="Open...", command=_open).grid(
         column=3, row=0, sticky="ew", padx="2", pady="2"
     )
 
     # Navigation group
-    nav_group = ttk.LabelFrame(topframe, text="Navigation", padding="5")
-    nav_group.grid(column=1, row=0, sticky="ew")
+    nav_group = ttk.LabelFrame(topframe, text="Navigation")
+    nav_group.grid(column=1, row=0, sticky="ew", padx="0 .1c")
+    # Create inner frame for consistent background
+    nav_inner = ttk.Frame(nav_group)
+    nav_inner.pack(fill="both", expand=True, padx=5, pady=5)
 
-    ttk.Button(nav_group, text="Jump to...", command=_jump_to_dialog, width=12).grid(
+    ttk.Button(nav_inner, text="Jump to...", command=_jump_to_dialog, width=12).grid(
         column=0, row=0, sticky="ew", padx="2", pady="2"
     )
 
-    # View options group
-    options_group = ttk.LabelFrame(topframe, text="View Options", padding="5")
-    options_group.grid(column=0, row=1, columnspan=2, sticky="ew", pady=".1c 0")
+    # View options group (includes theme toggle)
+    options_group = ttk.LabelFrame(topframe, text="View Options")
+    options_group.grid(column=0, row=1, columnspan=3, sticky="ew", pady=".1c 0")
+    # Create inner frame for consistent background
+    options_inner = ttk.Frame(options_group)
+    options_inner.pack(fill="both", expand=True, padx=5, pady=5)
+
+    # Configure column weights to ensure proper expansion
+    options_inner.columnconfigure(0, weight=1)
+    options_inner.columnconfigure(1, weight=1)
+    options_inner.columnconfigure(2, weight=1)
+    options_inner.columnconfigure(3, weight=0)  # Theme button: fixed width
 
     ttk.Checkbutton(
-        options_group, text="Show name", command=_do_showname, variable=_show_name_var
+        options_inner, text="Show name", command=_do_showname, variable=_show_name_var
     ).grid(column=0, row=0, sticky="w", padx="5", pady="2")
 
     ttk.Checkbutton(
-        options_group, text="Show all", command=_do_showall, variable=_show_all_var
+        options_inner, text="Show all", command=_do_showall, variable=_show_all_var
     ).grid(column=1, row=0, sticky="w", padx="5", pady="2")
 
     ttk.Checkbutton(
-        options_group,
+        options_inner,
         text="Single-menu mode",
         command=_do_tree_mode,
         variable=_single_menu_var,
     ).grid(column=2, row=0, sticky="w", padx="5", pady="2")
+
+    # Theme toggle button
+    global _theme_button
+    _theme_button = ttk.Button(
+        options_inner, text="☀ Light", command=lambda: _toggle_theme(None), width=12
+    )
+    _theme_button.grid(column=3, row=0, sticky="e", padx="5", pady="2")
 
     # Allow the show-all and single-menu status to be queried via plain global
     # Python variables, which is faster and simpler
@@ -604,10 +849,9 @@ def _create_top_widgets():
     _trace_write(_show_all_var, show_all_updated)
     _show_all_var.set(False)
 
-    # Create integrated menu path bar with back button
+    # Create integrated menu path bar with back button - use ttk.Frame for consistent theming
     path_frame = ttk.Frame(topframe, relief="groove", borderwidth=1)
-    path_frame.grid(column=0, row=2, columnspan=2, sticky="ew", pady=".1c 0")
-
+    path_frame.grid(column=0, row=2, columnspan=3, sticky="ew", pady=".1c 0")
     _backbutton = ttk.Button(
         path_frame, text="\u25c0 Back", command=_leave_menu, state="disabled", width=8
     )
@@ -628,11 +872,11 @@ def _create_top_widgets():
     _trace_write(_single_menu_var, tree_mode_updated)
     _single_menu_var.set(False)
 
-    ttk.Label(path_frame, text="Path:", font=("TkDefaultFont", 9, "bold")).pack(
-        side="left", padx=(10, 2)
-    )
+    # Use ttk.Label for consistent theming
+    path_label = ttk.Label(path_frame, text="Path:", font=("TkDefaultFont", 9, "bold"))
+    path_label.pack(side="left", padx=(10, 2))
 
-    _menupath = ttk.Label(path_frame, anchor="w", relief="flat", padding="2 4")
+    _menupath = ttk.Label(path_frame, anchor="w", relief="flat")
     _menupath.pack(side="left", fill="x", expand=True, padx=2, pady=2)
 
 
@@ -642,10 +886,15 @@ def _create_kconfig_tree_and_desc(parent):
     # Panedwindow and the Treeview. This code is shared between the main window
     # and the jump-to dialog.
 
+    global _desc_text
+
     panedwindow = ttk.Panedwindow(parent, orient=VERTICAL)
 
     tree_frame, tree = _create_kconfig_tree(panedwindow)
     desc_frame, desc = _create_kconfig_desc(panedwindow)
+
+    # Save desc widget globally for theme updates
+    _desc_text = desc
 
     panedwindow.add(tree_frame, weight=1)
     panedwindow.add(desc_frame)
@@ -717,8 +966,9 @@ def _create_kconfig_tree(parent):
     )  # Dark green for menu/choice items
 
     # Alternating row colors (zebra striping) for better readability
-    tree.tag_configure("oddrow", background="#f0f0f0")
-    tree.tag_configure("evenrow", background="#ffffff")
+    # Colors will be set by ThemeManager.apply()
+    tree.tag_configure("oddrow")
+    tree.tag_configure("evenrow")
 
     tree.grid(column=0, row=0, sticky="nsew")
 
@@ -749,7 +999,15 @@ def _create_kconfig_desc(parent):
 
     frame = ttk.Frame(parent)
 
-    desc = Text(frame, height=12, wrap="none", borderwidth=0, state="disabled")
+    desc = Text(
+        frame,
+        height=12,
+        wrap="none",
+        borderwidth=0,
+        state="disabled",
+        bg=_theme_manager.colors["tree_bg"],
+        fg=_theme_manager.colors["fg_primary"],
+    )
     desc.grid(column=0, row=0, sticky="nsew")
 
     # Work around not being able to Ctrl-C/V text from a disabled Text widget, with a
@@ -789,15 +1047,15 @@ def _create_status_bar():
     global _status_label
     global _stats_label
 
+    # Use ttk.Frame for consistent theming
     status_frame = ttk.Frame(_root, relief="sunken", borderwidth=1)
     status_frame.grid(column=0, row=3, sticky="ew")
-
-    # Left side: Status message
-    _status_label = ttk.Label(status_frame, anchor="w", padding="2 2")
+    # Left side: Status message - use ttk.Label for consistent theming
+    _status_label = ttk.Label(status_frame, anchor="w", padding=(2, 2))
     _status_label.pack(side="left", fill="x", expand=True)
 
-    # Right side: Statistics
-    _stats_label = ttk.Label(status_frame, anchor="e", padding="2 2")
+    # Right side: Statistics - use ttk.Label for consistent theming
+    _stats_label = ttk.Label(status_frame, anchor="e", padding=(2, 2))
     _stats_label.pack(side="right")
 
     _update_stats()
@@ -1727,6 +1985,22 @@ def _open(_=None):
 
             break
 
+    _tree.focus_set()
+
+
+def _toggle_theme(_):
+    # Toggles between light and dark theme
+
+    _theme_manager.toggle()
+
+    # Update button text to reflect current theme
+    global _theme_button
+    if _theme_manager.current_theme == "dark":
+        _theme_button.configure(text="🌙 Dark")
+    else:
+        _theme_button.configure(text="☀ Light")
+
+    _update_tree()
     _tree.focus_set()
 
 
