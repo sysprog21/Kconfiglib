@@ -104,9 +104,9 @@ _USE_EMBEDDED_IMAGES = True
 
 # Help text for the jump-to dialog
 _JUMP_TO_HELP = """\
-Type one or more strings/regexes and press Enter to list items that match all
-of them. Python's regex flavor is used (see the 're' module). Double-clicking
-an item will jump to it. Item values can be toggled directly within the dialog.\
+Type to search - results update as you type. Supports multiple strings/regexes
+(space-separated) that must all match. Python's regex flavor is used (see 're'
+module). Double-click an item to jump to it. Values can be toggled within the dialog.\
 """
 
 
@@ -186,11 +186,13 @@ def menuconfig(kconf):
     global _jump_to_tree
     global _cur_menu
     global _tree_row_index
+    global _search_after_id
 
     _kconf = kconf
 
     _jump_to_tree = None
     _tree_row_index = 0
+    _search_after_id = None
 
     _create_id_to_node()
 
@@ -2061,17 +2063,34 @@ def _try_load(filename):
 def _jump_to_dialog(_=None):
     # Pops up a dialog for jumping directly to a particular node. Symbol values
     # can also be changed within the dialog.
-    #
-    # Note: There's nothing preventing this from doing an incremental search
-    # like menuconfig.py does, but currently it's a bit jerky for large Kconfig
-    # trees, at least when inputting the beginning of the search string. We'd
-    # need to somehow only update the tree items that are shown in the Treeview
-    # to fix it.
 
     global _jump_to_tree
+    global _search_after_id
+
+    _search_after_id = None
 
     def search(_=None):
+        # Clear "Searching..." message
+        if msglabel["text"] == "Searching...":
+            msglabel["text"] = ""
         _update_jump_to_matches(msglabel, entry.get())
+
+    def interactive_search(_=None):
+        # Performs incremental search with debouncing to avoid excessive updates
+        global _search_after_id
+
+        # Cancel any pending search
+        if _search_after_id:
+            dialog.after_cancel(_search_after_id)
+
+        # Show searching indicator for non-empty queries
+        search_text = entry.get()
+        if search_text:
+            msglabel["text"] = "Searching..."
+
+        # Schedule a new search after a short delay (150ms)
+        # This provides responsive feedback while avoiding excessive updates
+        _search_after_id = dialog.after(150, lambda: search())
 
     def jump_to_selected(event=None):
         # Jumps to the selected node and closes the dialog
@@ -2115,6 +2134,9 @@ def _jump_to_dialog(_=None):
     entry.grid(column=0, row=1, sticky="ew", padx=".1c", pady=".1c")
     entry.focus_set()
 
+    # Bind KeyRelease for interactive search
+    entry.bind("<KeyRelease>", interactive_search)
+    # Still allow immediate search with Enter
     entry.bind("<Return>", search)
     entry.bind("<KP_Enter>", search)
 
@@ -2156,7 +2178,15 @@ def _jump_to_dialog(_=None):
     # add=True to avoid overriding the description text update
     tree.bind("<<TreeviewSelect>>", tree_select, add=True)
 
+    def on_dialog_destroy():
+        # Clean up any pending search callbacks
+        global _search_after_id
+        if _search_after_id:
+            dialog.after_cancel(_search_after_id)
+            _search_after_id = None
+
     dialog.bind("<Escape>", lambda _: dialog.destroy())
+    dialog.protocol("WM_DELETE_WINDOW", lambda: (on_dialog_destroy(), dialog.destroy()))
 
     # Wait for the user to be done with the dialog
     _root.wait_window(dialog)
