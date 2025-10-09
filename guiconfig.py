@@ -139,6 +139,9 @@ def _main():
 #     Label with status text shown at the bottom of the main window
 #     ("Modified", "Saved to ...", etc.)
 #
+#   _stats_label:
+#     Label showing statistics (symbol count, changed count) in the status bar
+#
 #   _id_to_node:
 #     We can't use Node objects directly as Treeview item IDs, so we use their
 #     id()s instead. This dictionary maps Node id()s back to Nodes. (The keys
@@ -182,10 +185,12 @@ def menuconfig(kconf):
     global _minconf_filename
     global _jump_to_tree
     global _cur_menu
+    global _tree_row_index
 
     _kconf = kconf
 
     _jump_to_tree = None
+    _tree_row_index = 0
 
     _create_id_to_node()
 
@@ -315,6 +320,7 @@ def _create_ui():
     _fix_treeview_issues()
 
     _create_top_widgets()
+    _create_menubar()
     # Create the pane with the Kconfig tree and description text
     panedwindow, _tree = _create_kconfig_tree_and_desc(_root)
     panedwindow.grid(column=0, row=1, sticky="nsew")
@@ -482,8 +488,47 @@ def _init_misc_ui():
             style.theme_use("clam")
 
 
+def _create_menubar():
+    # Creates the menu bar at the top of the window
+    # Note: This is called after _create_top_widgets() initializes the variables
+
+    menubar = Menu(_root)
+    _root.config(menu=menubar)
+
+    # File menu
+    file_menu = Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="File", menu=file_menu)
+    file_menu.add_command(label="Save", command=_save)
+    file_menu.add_command(label="Save As...", command=_save_as)
+    file_menu.add_command(label="Save Minimal...", command=_save_minimal)
+    file_menu.add_separator()
+    file_menu.add_command(label="Open...", command=_open)
+    file_menu.add_separator()
+    file_menu.add_command(label="Quit", command=_on_quit)
+
+    # Options menu
+    options_menu = Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="Options", menu=options_menu)
+    options_menu.add_checkbutton(
+        label="Show Name",
+        variable=_show_name_var,
+        command=_do_showname,
+    )
+    options_menu.add_checkbutton(
+        label="Show All",
+        variable=_show_all_var,
+        command=_do_showall,
+    )
+    options_menu.add_checkbutton(
+        label="Single-Menu Mode",
+        variable=_single_menu_var,
+        command=_do_tree_mode,
+    )
+
+
 def _create_top_widgets():
     # Creates the controls above the Kconfig tree in the main window
+    # Also initializes the option variables used by the menu bar
 
     global _show_all_var
     global _show_name_var
@@ -491,36 +536,61 @@ def _create_top_widgets():
     global _menupath
     global _backbutton
 
-    topframe = ttk.Frame(_root)
-    topframe.grid(column=0, row=0, sticky="ew")
-
-    ttk.Button(topframe, text="Save", command=_save).grid(
-        column=0, row=0, sticky="ew", padx=".05c", pady=".05c"
-    )
-
-    ttk.Button(topframe, text="Save as...", command=_save_as).grid(
-        column=1, row=0, sticky="ew"
-    )
-
-    ttk.Button(topframe, text="Save minimal (advanced)...", command=_save_minimal).grid(
-        column=2, row=0, sticky="ew", padx=".05c"
-    )
-
-    ttk.Button(topframe, text="Open...", command=_open).grid(column=3, row=0)
-
-    ttk.Button(topframe, text="Jump to...", command=_jump_to_dialog).grid(
-        column=4, row=0, padx=".05c"
-    )
-
+    # Initialize option variables first (needed by menubar)
     _show_name_var = BooleanVar()
-    ttk.Checkbutton(
-        topframe, text="Show name", command=_do_showname, variable=_show_name_var
-    ).grid(column=0, row=1, sticky="nsew", padx=".05c", pady="0 .05c", ipady=".2c")
-
     _show_all_var = BooleanVar()
+    _single_menu_var = BooleanVar()
+
+    topframe = ttk.Frame(_root)
+    topframe.grid(column=0, row=0, sticky="ew", padx=".1c", pady=".1c")
+
+    # Create button groups with separators
+    # File operations group
+    file_group = ttk.LabelFrame(topframe, text="File Operations", padding="5")
+    file_group.grid(column=0, row=0, sticky="ew", padx="0 .1c")
+
+    ttk.Button(file_group, text="Save", command=_save, width=12).grid(
+        column=0, row=0, sticky="ew", padx="2", pady="2"
+    )
+
+    ttk.Button(file_group, text="Save as...", command=_save_as, width=12).grid(
+        column=1, row=0, sticky="ew", padx="2", pady="2"
+    )
+
+    ttk.Button(
+        file_group, text="Save minimal...", command=_save_minimal, width=12
+    ).grid(column=2, row=0, sticky="ew", padx="2", pady="2")
+
+    ttk.Button(file_group, text="Open...", command=_open, width=12).grid(
+        column=3, row=0, sticky="ew", padx="2", pady="2"
+    )
+
+    # Navigation group
+    nav_group = ttk.LabelFrame(topframe, text="Navigation", padding="5")
+    nav_group.grid(column=1, row=0, sticky="ew")
+
+    ttk.Button(nav_group, text="Jump to...", command=_jump_to_dialog, width=12).grid(
+        column=0, row=0, sticky="ew", padx="2", pady="2"
+    )
+
+    # View options group
+    options_group = ttk.LabelFrame(topframe, text="View Options", padding="5")
+    options_group.grid(column=0, row=1, columnspan=2, sticky="ew", pady=".1c 0")
+
     ttk.Checkbutton(
-        topframe, text="Show all", command=_do_showall, variable=_show_all_var
-    ).grid(column=1, row=1, sticky="nsew", pady="0 .05c")
+        options_group, text="Show name", command=_do_showname, variable=_show_name_var
+    ).grid(column=0, row=0, sticky="w", padx="5", pady="2")
+
+    ttk.Checkbutton(
+        options_group, text="Show all", command=_do_showall, variable=_show_all_var
+    ).grid(column=1, row=0, sticky="w", padx="5", pady="2")
+
+    ttk.Checkbutton(
+        options_group,
+        text="Single-menu mode",
+        command=_do_tree_mode,
+        variable=_single_menu_var,
+    ).grid(column=2, row=0, sticky="w", padx="5", pady="2")
 
     # Allow the show-all and single-menu status to be queried via plain global
     # Python variables, which is faster and simpler
@@ -532,39 +602,36 @@ def _create_top_widgets():
     _trace_write(_show_all_var, show_all_updated)
     _show_all_var.set(False)
 
-    _single_menu_var = BooleanVar()
-    ttk.Checkbutton(
-        topframe,
-        text="Single-menu mode",
-        command=_do_tree_mode,
-        variable=_single_menu_var,
-    ).grid(column=2, row=1, sticky="nsew", padx=".05c", pady="0 .05c")
+    # Create integrated menu path bar with back button
+    path_frame = ttk.Frame(topframe, relief="groove", borderwidth=1)
+    path_frame.grid(column=0, row=2, columnspan=2, sticky="ew", pady=".1c 0")
 
     _backbutton = ttk.Button(
-        topframe, text="<--", command=_leave_menu, state="disabled"
+        path_frame, text="\u25c0 Back", command=_leave_menu, state="disabled", width=8
     )
-    _backbutton.grid(column=0, row=4, sticky="nsew", padx=".05c", pady="0 .05c")
+    _backbutton.pack(side="left", padx=2, pady=2)
+    _backbutton.pack_forget()  # Initially hidden
 
     def tree_mode_updated(*_):
         global _single_menu
         _single_menu = _single_menu_var.get()
 
         if _single_menu:
-            _backbutton.grid()
+            _backbutton.pack(
+                side="left", padx=2, pady=2, before=path_frame.winfo_children()[1]
+            )
         else:
-            _backbutton.grid_remove()
+            _backbutton.pack_forget()
 
     _trace_write(_single_menu_var, tree_mode_updated)
     _single_menu_var.set(False)
 
-    # Column to the right of the buttons that the menu path extends into, so
-    # that it can grow wider than the buttons
-    topframe.columnconfigure(5, weight=1)
-
-    _menupath = ttk.Label(topframe)
-    _menupath.grid(
-        column=0, row=3, columnspan=6, sticky="w", padx="0.05c", pady="0 .05c"
+    ttk.Label(path_frame, text="Path:", font=("TkDefaultFont", 9, "bold")).pack(
+        side="left", padx=(10, 2)
     )
+
+    _menupath = ttk.Label(path_frame, anchor="w", relief="flat", padding="2 4")
+    _menupath.pack(side="left", fill="x", expand=True, padx=2, pady=2)
 
 
 def _create_kconfig_tree_and_desc(parent):
@@ -617,6 +684,11 @@ def _create_kconfig_tree(parent):
     frame = ttk.Frame(parent)
 
     tree = ttk.Treeview(frame, selectmode="browse", height=20, columns=("name",))
+
+    # Configure column widths and headers
+    tree.column("#0", width=400, minwidth=200, stretch=True)
+    tree.column("name", width=200, minwidth=100, stretch=True)
+
     tree.heading("#0", text="Option", anchor="w")
     tree.heading("name", text="Name", anchor="w")
 
@@ -634,7 +706,17 @@ def _create_kconfig_tree(parent):
     tree.tag_configure("not-selected", image=_not_selected_img)
     tree.tag_configure("selected", image=_selected_img)
     tree.tag_configure("edit", image=_edit_img)
-    tree.tag_configure("invisible", foreground="red")
+
+    # Enhanced semantic color tags
+    tree.tag_configure("invisible", foreground="#cc0000")  # Red for invisible items
+    tree.tag_configure("new-item", foreground="#0066cc")  # Blue for NEW items
+    tree.tag_configure(
+        "menu-item", foreground="#006600"
+    )  # Dark green for menu/choice items
+
+    # Alternating row colors (zebra striping) for better readability
+    tree.tag_configure("oddrow", background="#f0f0f0")
+    tree.tag_configure("evenrow", background="#ffffff")
 
     tree.grid(column=0, row=0, sticky="nsew")
 
@@ -700,18 +782,42 @@ def _add_vscrollbar(parent, widget):
 
 
 def _create_status_bar():
-    # Creates the status bar at the bottom of the main window
+    # Creates an enhanced status bar at the bottom of the main window
 
     global _status_label
+    global _stats_label
 
-    _status_label = ttk.Label(_root, anchor="e", padding="0 0 0.4c 0")
-    _status_label.grid(column=0, row=3, sticky="ew")
+    status_frame = ttk.Frame(_root, relief="sunken", borderwidth=1)
+    status_frame.grid(column=0, row=3, sticky="ew")
+
+    # Left side: Status message
+    _status_label = ttk.Label(status_frame, anchor="w", padding="2 2")
+    _status_label.pack(side="left", fill="x", expand=True)
+
+    # Right side: Statistics
+    _stats_label = ttk.Label(status_frame, anchor="e", padding="2 2")
+    _stats_label.pack(side="right")
+
+    _update_stats()
 
 
 def _set_status(s):
     # Sets the text in the status bar to 's'
 
     _status_label["text"] = s
+
+
+def _update_stats():
+    # Updates the statistics label in the status bar
+
+    if not _kconf:
+        return
+
+    total_syms = len(_kconf.unique_defined_syms)
+    changed_syms = sum(
+        1 for sym in _kconf.unique_defined_syms if sym.user_value is not None
+    )
+    _stats_label["text"] = "Symbols: {} | Changed: {}".format(total_syms, changed_syms)
 
 
 def _set_conf_changed(changed):
@@ -722,6 +828,7 @@ def _set_conf_changed(changed):
     _conf_changed = changed
     if changed:
         _set_status("Modified")
+    _update_stats()
 
 
 def _update_tree():
@@ -739,6 +846,10 @@ def _update_tree():
     # Detach all tree items before re-stringing them. This is relatively fast,
     # luckily.
     _tree.detach(*_id_to_node.keys())
+
+    # Reset row counter for alternating colors
+    global _tree_row_index
+    _tree_row_index = 0
 
     if _single_menu:
         _build_menu_tree()
@@ -855,8 +966,20 @@ def _add_to_tree(node, top):
     # the nodes linearly to get the correct order. 'top' holds the menu that
     # corresponds to the top-level menu, and can vary in single-menu mode.
 
+    global _tree_row_index
+
     parent = node.parent
     _tree.move(id(node), "" if parent is top else id(parent), "end")
+
+    # Build tags: base tags + row color + optional invisible
+    base_tags = _img_tag(node)
+    row_tag = "oddrow" if _tree_row_index % 2 else "evenrow"
+
+    if _visible(node) or not _show_all:
+        tags = base_tags + " " + row_tag
+    else:
+        tags = base_tags + " invisible " + row_tag
+
     _tree.item(
         id(node),
         text=_node_str(node),
@@ -864,12 +987,10 @@ def _add_to_tree(node, top):
         # show-all mode, which could look confusing/broken. Invisible symbols
         # are shown outside show-all mode if an invisible symbol has visible
         # children in an implicit menu.
-        tags=(
-            _img_tag(node)
-            if _visible(node) or not _show_all
-            else _img_tag(node) + " invisible"
-        ),
+        tags=tags,
     )
+
+    _tree_row_index += 1
 
 
 def _get_force_info(sym):
