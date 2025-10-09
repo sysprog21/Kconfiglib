@@ -257,12 +257,13 @@ def menuconfig(kconf):
 def _load_config():
     # Loads any existing .config file. See the Kconfig.load_config() docstring.
     #
-    # Returns True if .config is missing or outdated. We always prompt for
-    # saving the configuration in that case.
+    # Returns True if .config is missing or outdated. We prompt for saving the
+    # configuration if there are actual changes or if no .config file exists
+    # (so user can save the default configuration).
 
     print(_kconf.load_config())
     if not os.path.exists(_conf_filename):
-        # No .config
+        # No .config exists - treat as changed so user can save defaults
         return True
 
     return _needs_save()
@@ -1774,17 +1775,32 @@ def _vis_after(item):
 def _on_quit(_=None):
     # Called when the user wants to exit
 
-    if not _conf_changed:
+    config_exists = os.path.exists(_conf_filename)
+
+    if not _conf_changed and config_exists:
         _quit("No changes to save (for '{}')".format(_conf_filename))
         return
 
+    # Adjust dialog message if .config doesn't exist
+    if not config_exists:
+        dialog_title = "Quit"
+        dialog_message = (
+            "No configuration file found.\nSave new configuration before quitting?"
+        )
+    else:
+        dialog_title = "Quit"
+        dialog_message = "Save changes?"
+
     while True:
-        ync = messagebox.askyesnocancel("Quit", "Save changes?")
+        ync = messagebox.askyesnocancel(dialog_title, dialog_message)
         if ync is None:
             return
 
         if not ync:
-            _quit("Configuration ({}) was not saved".format(_conf_filename))
+            if not config_exists:
+                _quit("Configuration was not saved")
+            else:
+                _quit("Configuration ({}) was not saved".format(_conf_filename))
             return
 
         if _try_save(_kconf.write_config, _conf_filename, "configuration"):

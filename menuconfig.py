@@ -863,13 +863,14 @@ def _wrapper(func):
 def _load_config():
     # Loads any existing .config file. See the Kconfig.load_config() docstring.
     #
-    # Returns True if .config exists and is outdated. We prompt for saving the
-    # configuration only if there are actual changes.
+    # Returns True if .config exists and is outdated, or if .config doesn't exist
+    # at all. We prompt for saving the configuration if there are actual changes
+    # or if no .config file exists (so user can save the default configuration).
 
     print(_kconf.load_config())
     if not os.path.exists(_conf_filename):
-        # No .config - no changes yet
-        return False
+        # No .config exists - treat as changed so user can save defaults
+        return True
 
     return _needs_save()
 
@@ -1071,13 +1072,21 @@ def _menuconfig(stdscr):
 
 
 def _quit_dialog():
-    if not _conf_changed:
+    config_exists = os.path.exists(_conf_filename)
+
+    if not _conf_changed and config_exists:
         return "No changes to save (for '{}')".format(_conf_filename)
 
     # Use button dialog with Yes/No/Cancel buttons (matching lxdialog style)
+    # Adjust message if .config doesn't exist
+    if not config_exists:
+        dialog_text = "No configuration file found.\nSave new configuration?"
+    else:
+        dialog_text = "Save configuration?"
+
     result = _button_dialog(
         None,  # No title in yesno dialog
-        "Save configuration?",
+        dialog_text,
         [" Yes ", "  No  ", " Cancel "],
         default_button=0,
     )
@@ -1094,6 +1103,8 @@ def _quit_dialog():
         return None
 
     elif result == 1:  # No
+        if not config_exists:
+            return "Configuration was not saved"
         return "Configuration ({}) was not saved".format(_conf_filename)
 
 
