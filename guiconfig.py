@@ -17,6 +17,10 @@ symbols defined with 'config' and symbols defined with 'menuconfig'.
 
 A show-all mode is available that shows invisible items in red.
 
+A dark/light theme system provides a modern, professional appearance with a blue
+color scheme. The interface automatically adapts to window resizing with a
+responsive layout.
+
 Supports both mouse and keyboard controls. The following keyboard shortcuts are
 available:
 

@@ -43,7 +43,7 @@ pip install git+https://github.com/sysprog21/Kconfiglib
 Microsoft Windows is supported.
 
 When installed via `pip`, you get both the core library and the following executables.
-All but two (`genconfig` and `setconfig`) mirror functionality available in the C tools.
+All but three (`genconfig`, `setconfig`, and `lint`) mirror functionality available in the C tools.
 - [menuconfig](menuconfig.py)
 - [guiconfig](guiconfig.py)
 - [oldconfig](oldconfig.py)
@@ -379,6 +379,10 @@ Three configuration interfaces are currently available:
 
   When single-menu mode is enabled, only a single menu is displayed at a time, similar to the terminal menuconfig.
   In this mode, it distinguishes between symbols defined with `config` and those defined with `menuconfig`.
+
+  `guiconfig.py` features a modern dark/light theme system with a professional blue color scheme.
+  Toggle between themes via the Theme menu.
+  The interface includes a responsive layout that adapts to window resizing.
 
   `guiconfig.py` has been tested on X11, Windows, and macOS, and it works with both Python 2 and Python 3.
 
