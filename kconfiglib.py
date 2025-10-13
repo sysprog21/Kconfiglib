@@ -1072,6 +1072,16 @@ class Kconfig(object):
             "lineno": (_lineno_fn, 0, 0),
             "shell": (_shell_fn, 1, 1),
             "warning-if": (_warning_if_fn, 2, 2),
+            # Kbuild toolchain test functions
+            "if-success": (_if_success_fn, 3, 3),
+            "success": (_success_fn, 1, 1),
+            "failure": (_failure_fn, 1, 1),
+            "cc-option": (_cc_option_fn, 1, 2),
+            "cc-option-bit": (_cc_option_bit_fn, 1, 1),
+            "ld-option": (_ld_option_fn, 1, 1),
+            "as-instr": (_as_instr_fn, 1, 2),
+            "as-option": (_as_option_fn, 1, 2),
+            "rustc-option": (_rustc_option_fn, 1, 1),
         }
 
         # Add any user-defined preprocessor functions
@@ -7235,6 +7245,221 @@ def _shell_fn(kconf, _, command):
     # encoding when passing universal_newlines=True to Popen() (the 'encoding'
     # parameter was added in 3.6), so we do this manual version instead.
     return "\n".join(stdout.splitlines()).rstrip("\n").replace("\n", " ")
+
+
+def _success_fn(kconf, _, command):
+    # Returns 'y' if the shell command exits with 0, otherwise 'n'
+    # This is the fundamental building block for other Kbuild test functions
+    import subprocess
+
+    try:
+        # Run command, suppress output
+        proc = subprocess.Popen(
+            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "y" if proc.returncode == 0 else "n"
+    except Exception:
+        return "n"
+
+
+def _cc_option_fn(kconf, _, option, fallback=""):
+    # Test if the C compiler supports a given option
+    # Returns 'y' if supported, 'n' otherwise
+    import subprocess
+    import tempfile
+    import os
+
+    cc = os.environ.get("CC", "gcc")
+
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp()
+        cmd = ("{} -Werror {} -c -x c /dev/null -o {}/tmp.o 2>/dev/null").format(
+            cc, option, tmpdir
+        )
+
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "y" if proc.returncode == 0 else "n"
+    except Exception:
+        return "n"
+    finally:
+        if tmpdir:
+            try:
+                import shutil
+
+                shutil.rmtree(tmpdir)
+            except Exception:
+                pass
+
+
+def _ld_option_fn(kconf, _, option):
+    # Test if the linker supports a given option
+    # Returns 'y' if supported, 'n' otherwise
+    import subprocess
+    import os
+
+    ld = os.environ.get("LD", "ld")
+
+    try:
+        cmd = "{} -v {} 2>/dev/null".format(ld, option)
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "y" if proc.returncode == 0 else "n"
+    except Exception:
+        return "n"
+
+
+def _as_instr_fn(kconf, _, instr, extra_flags=""):
+    # Test if the assembler supports a specific instruction
+    # Returns 'y' if supported, 'n' otherwise
+    import subprocess
+    import os
+
+    cc = os.environ.get("CC", "gcc")
+
+    try:
+        # Use printf to create the instruction, pipe to compiler as assembler
+        cmd = (
+            'printf "%b\\n" "{}" | '
+            "{} {} -Wa,--fatal-warnings -c -x assembler-with-cpp -o /dev/null - 2>/dev/null"
+        ).format(instr.replace('"', '\\"'), cc, extra_flags)
+
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "y" if proc.returncode == 0 else "n"
+    except Exception:
+        return "n"
+
+
+def _as_option_fn(kconf, _, option, fallback=""):
+    # Test if the assembler (via CC) supports a given option
+    # Returns 'y' if supported, 'n' otherwise
+    import subprocess
+    import tempfile
+    import os
+
+    cc = os.environ.get("CC", "gcc")
+
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp()
+        cmd = ("{} {} -c -x assembler /dev/null -o {}/tmp.o 2>/dev/null").format(
+            cc, option, tmpdir
+        )
+
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "y" if proc.returncode == 0 else "n"
+    except Exception:
+        return "n"
+    finally:
+        if tmpdir:
+            try:
+                import shutil
+
+                shutil.rmtree(tmpdir)
+            except Exception:
+                pass
+
+
+def _if_success_fn(kconf, _, command, then_val, else_val):
+    # Executes command and returns then_val if successful, else_val otherwise
+    # This is the most general form, used by success/failure
+    import subprocess
+
+    try:
+        proc = subprocess.Popen(
+            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return then_val if proc.returncode == 0 else else_val
+    except Exception:
+        return else_val
+
+
+def _failure_fn(kconf, _, command):
+    # Returns 'n' if the shell command exits with 0, otherwise 'y'
+    # Inverse of success
+    import subprocess
+
+    try:
+        proc = subprocess.Popen(
+            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "n" if proc.returncode == 0 else "y"
+    except Exception:
+        return "y"
+
+
+def _cc_option_bit_fn(kconf, _, option):
+    # Test if the C compiler supports a specific bit flag
+    # Returns the option if supported, empty string otherwise
+    import subprocess
+    import os
+
+    cc = os.environ.get("CC", "gcc")
+
+    try:
+        cmd = ("{} -Werror {} -E -x c /dev/null -o /dev/null 2>/dev/null").format(
+            cc, option
+        )
+
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return option if proc.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _rustc_option_fn(kconf, _, option):
+    # Test if the Rust compiler supports a given option
+    # Returns 'y' if supported, 'n' otherwise
+    import subprocess
+    import tempfile
+    import os
+
+    rustc = os.environ.get("RUSTC", "rustc")
+
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp()
+        # Create a dummy Rust file
+        dummy_rs = os.path.join(tmpdir, "lib.rs")
+        with open(dummy_rs, "w") as f:
+            f.write("")
+
+        cmd = (
+            "{} {} --crate-type=rlib {} --out-dir={} -o {}/tmp.rlib 2>/dev/null"
+        ).format(rustc, option, dummy_rs, tmpdir, tmpdir)
+
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.communicate()
+        return "y" if proc.returncode == 0 else "n"
+    except Exception:
+        return "n"
+    finally:
+        if tmpdir:
+            try:
+                import shutil
+
+                shutil.rmtree(tmpdir)
+            except Exception:
+                pass
 
 
 #
