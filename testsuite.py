@@ -3114,6 +3114,29 @@ config PRINT_ME_TOO
 
     sys.path.pop(0)
 
+    print("Testing Kbuild toolchain test functions")
+
+    c = Kconfig("Kconfiglib/tests/Kbuild_functions")
+
+    # Test basic success/failure functions
+    verify_value("TEST_SUCCESS", "y")
+    verify_value("TEST_FAILURE", "y")
+    verify_value("TEST_IF_SUCCESS", "y")
+
+    # Test compiler flag detection
+    verify_value("CC_HAS_WALL", "y")
+    verify_value("CC_HAS_WERROR", "y")
+
+    # Test invalid options return 'n'
+    verify_value("TEST_INVALID_OPTION", "n")
+    verify_value("TEST_FAILURE_TRUE", "n")
+
+    # Test assembler support
+    verify_value("AS_HAS_NOP", "y")
+
+    # Test nested function calls
+    verify_value("TEST_NESTED_SUCCESS_SHELL", "y")
+
     # This test can fail on older Python 3.x versions, because they don't
     # preserve dict insertion order during iteration. The output is still
     # correct, just different.

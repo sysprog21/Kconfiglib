@@ -1,0 +1,85 @@
+# Test Kbuild toolchain test functions
+
+config TEST_SUCCESS
+	def_bool $(success,true)
+	help
+	  Test success function with command that returns 0
+
+config TEST_FAILURE
+	def_bool $(failure,false)
+	help
+	  Test failure function with command that returns 0
+
+config TEST_IF_SUCCESS
+	def_bool $(if-success,true,y,n)
+	help
+	  Test if-success function with true command
+
+config CC_HAS_WALL
+	def_bool $(cc-option,-Wall)
+	help
+	  Test if compiler supports -Wall flag
+
+config CC_HAS_WERROR
+	def_bool $(cc-option,-Werror)
+	help
+	  Test if compiler supports -Werror flag
+
+config CC_HAS_FSTACK_PROTECTOR
+	def_bool $(cc-option,-fstack-protector)
+	help
+	  Test if compiler supports stack protector
+
+config LD_HAS_VERSION
+	def_bool $(ld-option,--version)
+	help
+	  Test if linker supports --version flag
+
+config AS_HAS_NOP
+	def_bool $(as-instr,nop)
+	help
+	  Test if assembler supports NOP instruction
+
+config AS_HAS_MOVQ
+	def_bool $(as-instr,movq %rax$(comma) %rbx)
+	help
+	  Test if assembler supports x86-64 MOVQ instruction
+
+config AS_HAS_CUSTOM_FLAG
+	def_bool $(as-option,-march=native)
+	help
+	  Test if assembler (via CC) supports custom flags
+
+config CC_STACK_USAGE_FLAG
+	string
+	default "$(cc-option-bit,-fstack-usage)"
+	help
+	  Returns -fstack-usage if supported, empty otherwise
+
+# Test nested function calls
+config TEST_NESTED_SUCCESS_SHELL
+	def_bool $(success,test -n "$(shell,echo test)")
+	help
+	  Test nested success and shell function calls
+
+config TEST_NESTED_IF_SUCCESS
+	def_bool $(if-success,test -z "$(shell,echo)",y,n)
+	help
+	  Test deeply nested function calls with if-success
+
+# Test with environment variables
+config TEST_CC_ENV
+	def_bool $(success,test -n "$CC")
+	help
+	  Test if CC environment variable is set
+
+# Test failure cases
+config TEST_INVALID_OPTION
+	def_bool $(cc-option,--this-option-does-not-exist-xyz)
+	help
+	  Test cc-option with invalid flag (should return n)
+
+config TEST_FAILURE_TRUE
+	def_bool $(failure,true)
+	help
+	  Test failure with true command (should return n)
