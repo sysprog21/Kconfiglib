@@ -1844,23 +1844,23 @@ def _check_valid(dialog, entry, sym, s):
     # Returns True if the string 's' is a well-formed value for 'sym'.
     # Otherwise, pops up an error and returns False.
 
-    if sym.type not in (INT, HEX):
+    if sym.orig_type not in (INT, HEX):
         # Anything goes for non-int/hex symbols
         return True
 
-    base = 10 if sym.type == INT else 16
+    base = 10 if sym.orig_type == INT else 16
     try:
         int(s, base)
     except ValueError:
         messagebox.showerror(
             "Bad value",
-            "'{}' is a malformed {} value".format(s, TYPE_TO_STR[sym.type]),
+            "'{}' is a malformed {} value".format(s, TYPE_TO_STR[sym.orig_type]),
             parent=dialog,
         )
         entry.focus_set()
         return False
 
-    for low_sym, high_sym, cond in sym.ranges:
+    for low_sym, high_sym, cond, _ in sym.ranges:
         if expr_value(cond):
             low_s = low_sym.str_value
             high_s = high_sym.str_value
@@ -1883,8 +1883,8 @@ def _range_info(sym):
     # Returns a string with information about the valid range for the symbol
     # 'sym', or None if 'sym' doesn't have a range
 
-    if sym.type in (INT, HEX):
-        for low, high, cond in sym.ranges:
+    if sym.orig_type in (INT, HEX):
+        for low, high, cond, _ in sym.ranges:
             if expr_value(cond):
                 return "Range: {}-{}".format(low.str_value, high.str_value)
 
