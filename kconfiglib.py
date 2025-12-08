@@ -3462,6 +3462,9 @@ class Kconfig(object):
 
                 node.item.is_optional = True
 
+            elif t0 is _T_TRANSITIONAL:
+                node.item.is_transitional = True
+
             else:
                 # Reuse the tokens for the non-property line later
                 self._reuse_tokens = True
@@ -4514,6 +4517,9 @@ class Symbol(object):
     is_constant:
       True if the symbol is a constant (quoted) symbol.
 
+    is_transitional:
+      True if config is in transition to a new name, hide from user
+
     kconfig:
       The Kconfig instance this symbol is from.
     """
@@ -4536,6 +4542,7 @@ class Symbol(object):
         "implies",
         "is_allnoconfig_y",
         "is_constant",
+        "is_transitional",
         "kconfig",
         "name",
         "nodes",
@@ -5101,6 +5108,9 @@ class Symbol(object):
             if self is self.kconfig.modules:
                 add("is the modules symbol")
 
+            if self.is_transitional:
+                add("transitional")
+
             add("direct deps " + TRI_TO_STR[expr_value(self.direct_dep)])
 
         if self.nodes:
@@ -5171,6 +5181,7 @@ class Symbol(object):
         # Symbol gets a .config entry.
 
         self.is_allnoconfig_y = self._was_set = self._write_to_conf = False
+        self.is_transitional = False
 
         # See Kconfig._build_dep()
         self._dependents = set()
@@ -7555,10 +7566,11 @@ except AttributeError:
     _T_SELECT,
     _T_SOURCE,
     _T_STRING,
+    _T_TRANSITIONAL,
     _T_TRISTATE,
     _T_UNEQUAL,
     _T_VISIBLE,
-) = range(1, 51)
+) = range(1, 52)
 
 # Keyword to token map, with the get() method assigned directly as a small
 # optimization
@@ -7604,6 +7616,7 @@ _get_keyword = {
     "select": _T_SELECT,
     "source": _T_SOURCE,
     "string": _T_STRING,
+    "transitional": _T_TRANSITIONAL,
     "tristate": _T_TRISTATE,
     "visible": _T_VISIBLE,
 }.get

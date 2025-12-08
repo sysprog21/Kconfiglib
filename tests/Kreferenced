@@ -5,6 +5,14 @@ config JUST_DEPENDS_ON_REFS
     bool
     depends on A && B
 
+config TRANSITIONAL
+    bool
+    default TRANSITIONAL_LEGACY_NAME
+
+config TRANSITIONAL_LEGACY_NAME
+    bool
+    transitional
+
 if A
 
 menu "menu"
