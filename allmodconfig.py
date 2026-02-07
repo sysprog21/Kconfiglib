@@ -13,6 +13,7 @@ Usage for the Linux kernel:
 
   $ make [ARCH=<arch>] scriptconfig SCRIPT=Kconfiglib/allmodconfig.py
 """
+
 import kconfiglib
 
 

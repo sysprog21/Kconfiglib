@@ -181,6 +181,7 @@ Doesn't work out of the box on Windows, but can be made to work with
 
 See the https://github.com/zephyrproject-rtos/windows-curses repository.
 """
+
 from __future__ import print_function
 
 import os
@@ -219,7 +220,6 @@ from kconfiglib import (
     standard_kconfig,
     standard_config_filename,
 )
-
 
 #
 # Configuration variables
@@ -1575,44 +1575,16 @@ def _draw_main():
 
     # Draw scrollbar if content is scrollable
     if max_scroll > 0:
-        scrollbar_x = menu_win_width - 2  # Right side, inside border
-        scrollbar_height = menu_win_height - 2  # Account for top and bottom borders
-
-        # Calculate scrollbar position (adjust for arrows at top and bottom)
-        # Position ranges from 1 to scrollbar_height - 2 (between the arrows)
-        # Use float() to ensure proper division in both Python 2 and 3
-        if scrollbar_height > 2:
-            scrollbar_pos = 1 + int(
-                (float(_menu_scroll) / max_scroll) * (scrollbar_height - 3)
-            )
-        else:
-            scrollbar_pos = 1
-
-        # Draw scrollbar with arrows and track
-        for i in range(scrollbar_height):
-            y = 1 + i  # Start after top border
-            if i == 0:
-                # Top arrow (up)
-                _safe_addch(
-                    _menu_win, y, scrollbar_x, curses.ACS_UARROW, _style["list"]
-                )
-            elif i == scrollbar_height - 1:
-                # Bottom arrow (down)
-                _safe_addch(
-                    _menu_win, y, scrollbar_x, curses.ACS_DARROW, _style["list"]
-                )
-            elif i == scrollbar_pos:
-                # Draw thumb (current position) - use reverse video space for highlight
-                _safe_addch(
-                    _menu_win,
-                    y,
-                    scrollbar_x,
-                    ord(" "),
-                    _style.get("selection", _style["list"]),
-                )
-            else:
-                # Draw track - use vertical line
-                _safe_addch(_menu_win, y, scrollbar_x, curses.ACS_VLINE, _style["list"])
+        _draw_scrollbar(
+            _menu_win,
+            _menu_scroll,
+            max_scroll,
+            menu_win_width - 2,
+            1,
+            menu_win_height - 2,
+            _style["list"],
+            _style.get("selection", _style["list"]),
+        )
 
     _menu_win.noutrefresh()
 
@@ -1968,12 +1940,7 @@ def _input_dialog(title, initial_text, info_text=None):
     # Horizontal scroll offset
     hscroll = max(i - edit_width() + 1, 0)
 
-    # Create shadow windows once
-    win_y, win_x = win.getbegyx()
-    win_height, win_width = win.getmaxyx()
-    bottom_shadow, right_shadow = _create_shadow_windows(
-        win_y, win_x, win_height, win_width
-    )
+    bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
     while True:
         # Draw the "main" display with the menu, etc., so that resizing still
@@ -1983,7 +1950,6 @@ def _input_dialog(title, initial_text, info_text=None):
 
         _draw_input_dialog(win, title, info_lines, s, i, hscroll)
 
-        # Refresh shadow windows after dialog window to ensure they're on top
         _refresh_shadow_windows(bottom_shadow, right_shadow)
 
         curses.doupdate()
@@ -1991,15 +1957,9 @@ def _input_dialog(title, initial_text, info_text=None):
         c = _getch_compat(win)
 
         if c == curses.KEY_RESIZE:
-            # Resize the main display too. The dialog floats above it.
             _resize_main()
             _resize_input_dialog(win, title, info_lines)
-            # Recreate shadow windows with new dialog size
-            win_y, win_x = win.getbegyx()
-            win_height, win_width = win.getmaxyx()
-            bottom_shadow, right_shadow = _create_shadow_windows(
-                win_y, win_x, win_height, win_width
-            )
+            bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
         elif c == "\n":
             _safe_curs_set(0)
@@ -2201,20 +2161,13 @@ def _key_dialog(title, text, keys):
 
     _resize_key_dialog(win, text)
 
-    # Create shadow windows once
-    win_y, win_x = win.getbegyx()
-    win_height, win_width = win.getmaxyx()
-    bottom_shadow, right_shadow = _create_shadow_windows(
-        win_y, win_x, win_height, win_width
-    )
+    bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
     while True:
-        # See _input_dialog()
         _draw_main()
 
         _draw_key_dialog(win, title, text)
 
-        # Refresh shadow windows after dialog window to ensure they're on top
         _refresh_shadow_windows(bottom_shadow, right_shadow)
 
         curses.doupdate()
@@ -2222,15 +2175,9 @@ def _key_dialog(title, text, keys):
         c = _getch_compat(win)
 
         if c == curses.KEY_RESIZE:
-            # Resize the main display too. The dialog floats above it.
             _resize_main()
             _resize_key_dialog(win, text)
-            # Recreate shadow windows with new dialog size
-            win_y, win_x = win.getbegyx()
-            win_height, win_width = win.getmaxyx()
-            bottom_shadow, right_shadow = _create_shadow_windows(
-                win_y, win_x, win_height, win_width
-            )
+            bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
         elif c == "\x1b":  # \x1B = ESC
             return None
@@ -2303,12 +2250,9 @@ def _button_dialog(title, text, buttons, default_button=0):
     win.resize(win_height, win_width)
     win.mvwin((_height(_stdscr) - win_height) // 2, (_width(_stdscr) - win_width) // 2)
 
-    # Create shadow windows once
-    win_y, win_x = win.getbegyx()
-    win_height, win_width = win.getmaxyx()
-    bottom_shadow, right_shadow = _create_shadow_windows(
-        win_y, win_x, win_height, win_width
-    )
+    bottom_shadow, right_shadow = _create_shadow_for_win(win)
+
+    frame_style = _style.get("dialog-frame", _style["dialog"])
 
     while True:
         # Draw main display behind dialog (calls noutrefresh on all subwindows)
@@ -2316,80 +2260,53 @@ def _button_dialog(title, text, buttons, default_button=0):
 
         win.erase()
 
-        # Draw box border with proper colors
-        # Use dialog-frame (blue background) for both box and border to get uniform blue frame
-        _draw_box(
-            win,
-            0,
-            0,
-            win_height,
-            win_width,
-            _style.get("dialog-frame", _style["dialog"]),
-            _style.get("dialog-frame", _style["dialog"]),
-        )
+        # Draw box border
+        _draw_box(win, 0, 0, win_height, win_width, frame_style, frame_style)
 
-        # Draw title bar with blue background if title provided
+        # Draw title bar if title provided
         if title:
-            # Fill entire top line with blue background
-            win.attron(_style.get("dialog-frame", _style["dialog"]))
+            win.attron(frame_style)
             for i in range(1, win_width - 1):
                 _safe_addch(win, 0, i, ord(" "))
-            # Draw title text centered
-            title_x = (win_width - len(title)) // 2
-            _safe_addstr(win, 0, title_x, title)
-            win.attroff(_style.get("dialog-frame", _style["dialog"]))
+            _safe_addstr(win, 0, (win_width - len(title)) // 2, title)
+            win.attroff(frame_style)
 
         # Draw horizontal separator line before buttons (height - 3)
-        # This line should have blue background
-        win.attron(_style.get("dialog-frame", _style["dialog"]))
+        win.attron(frame_style)
         _safe_addch(win, win_height - 3, 0, curses.ACS_LTEE)
         for i in range(1, win_width - 1):
             _safe_addch(win, win_height - 3, i, curses.ACS_HLINE)
         _safe_addch(win, win_height - 3, win_width - 1, curses.ACS_RTEE)
-        win.attroff(_style.get("dialog-frame", _style["dialog"]))
+        win.attroff(frame_style)
 
-        # Draw text content with blue background (dialog-frame style)
-        # Fill text area with blue background
-        win.attron(_style.get("dialog-frame", _style["dialog"]))
+        # Draw text content
+        win.attron(frame_style)
         for i in range(1, win_height - 3):
             for j in range(1, win_width - 1):
                 _safe_addch(win, i, j, ord(" "))
-        # Draw text lines
         for i, line in enumerate(lines):
-            if i < len(lines):
-                # Text starts at row 1, column 2 (inside border)
-                _safe_addstr(win, 1 + i, 2, line)
-        win.attroff(_style.get("dialog-frame", _style["dialog"]))
+            _safe_addstr(win, 1 + i, 2, line)
+        win.attroff(frame_style)
 
         # Buttons at row (height - 2)
         button_y = win_height - 2
 
-        # Fill button row with blue background (dialog-frame style)
-        win.attrset(_style.get("dialog-frame", _style["dialog"]))
+        # Fill button row background
+        win.attrset(frame_style)
         for i in range(1, win_width - 1):
             _safe_addch(win, button_y, i, ord(" "))
 
         # Calculate button positions with spacing
-        # For Yes/No: 13 chars spacing (from lxdialog/yesno.c)
-        # For 3+ buttons: smaller spacing for better fit
-        if len(buttons) == 2:
-            # Two buttons: use fixed spacing of 13
-            spacing = 13
-            total_width = (len(buttons[0]) + 2) + spacing + (len(buttons[1]) + 2)
-            button_x = (win_width - total_width) // 2
-            button_positions = [button_x, button_x + len(buttons[0]) + 2 + spacing]
-        else:
-            # Three or more buttons: use smaller spacing
-            spacing = 4
-            total_width = sum(len(b) + 2 for b in buttons) + spacing * (
-                len(buttons) - 1
-            )
-            button_x = (win_width - total_width) // 2
-            button_positions = []
-            current_x = button_x
-            for i, b in enumerate(buttons):
-                button_positions.append(current_x)
-                current_x += len(b) + 2 + spacing  # button width + spacing
+        # 2 buttons: 13 chars spacing (from lxdialog/yesno.c), 3+: spacing 4
+        btn_spacing = 13 if len(buttons) == 2 else 4
+        total_width = sum(len(b) + 2 for b in buttons) + btn_spacing * (
+            len(buttons) - 1
+        )
+        button_positions = []
+        current_x = (win_width - total_width) // 2
+        for b in buttons:
+            button_positions.append(current_x)
+            current_x += len(b) + 2 + btn_spacing
 
         # Draw buttons at calculated positions
         for i, button_label in enumerate(buttons):
@@ -2409,17 +2326,11 @@ def _button_dialog(title, text, buttons, default_button=0):
 
         if c == curses.KEY_RESIZE:
             _resize_main()
-            # Recalculate window size
             win.resize(win_height, win_width)
             win.mvwin(
                 (_height(_stdscr) - win_height) // 2, (_width(_stdscr) - win_width) // 2
             )
-            # Recreate shadow windows with new dialog size
-            win_y, win_x = win.getbegyx()
-            win_height, win_width = win.getmaxyx()
-            bottom_shadow, right_shadow = _create_shadow_windows(
-                win_y, win_x, win_height, win_width
-            )
+            bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
         elif c == "\x1b":  # ESC
             return None
@@ -2452,31 +2363,34 @@ def _print_button(win, label, y, x, selected):
     leading_spaces = len(label) - len(label.lstrip(" "))
     label_stripped = label.lstrip(" ")
 
+    # Resolve style suffix once: "active" or "inactive"
+    sfx = "active" if selected else "inactive"
+    btn_style = _style["button-" + sfx]
+    key_style = _style["button-key-" + sfx]
+    lbl_style = _style["button-label-" + sfx]
+
     # Move to position
     _safe_move(win, y, x)
 
-    # Draw bracket "<" with button style
-    win.attrset(_style["button-active" if selected else "button-inactive"])
+    # Draw bracket "<"
+    win.attrset(btn_style)
     _safe_addstr(win, y, x, "<")
 
     # Draw leading spaces with label style
-    win.attrset(_style["button-label-active" if selected else "button-label-inactive"])
+    win.attrset(lbl_style)
     for _ in range(leading_spaces):
         _safe_addch(win, y, x + 1 + _, ord(" "))
 
-    # Draw first character (hotkey) with key style
+    # Draw first character (hotkey) with key style, then rest with label style
     if label_stripped:
-        win.attrset(_style["button-key-active" if selected else "button-key-inactive"])
+        win.attrset(key_style)
         _safe_addch(win, y, x + 1 + leading_spaces, ord(label_stripped[0]))
 
-        # Draw rest of label with label style
-        win.attrset(
-            _style["button-label-active" if selected else "button-label-inactive"]
-        )
+        win.attrset(lbl_style)
         _safe_addstr(win, y, x + 1 + leading_spaces + 1, label_stripped[1:])
 
-    # Draw bracket ">" with button style
-    win.attrset(_style["button-active" if selected else "button-inactive"])
+    # Draw bracket ">"
+    win.attrset(btn_style)
     _safe_addstr(win, y, x + 1 + len(label), ">")
 
     # Move cursor to the hotkey position for selected button
@@ -2489,39 +2403,76 @@ def _draw_box(win, y, x, height, width, box_attr, border_attr):
     # box_attr: attribute for box body and right/bottom borders
     # border_attr: attribute for left/top borders
 
-    for i in range(height):
-        for j in range(width):
-            win_y, win_x = y + i, x + j
+    last_row = y + height - 1
+    last_col = x + width - 1
 
-            # Corners
-            if i == 0 and j == 0:
-                win.attrset(border_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_ULCORNER)
-            elif i == height - 1 and j == 0:
-                win.attrset(border_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_LLCORNER)
-            elif i == 0 and j == width - 1:
-                win.attrset(box_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_URCORNER)
-            elif i == height - 1 and j == width - 1:
-                win.attrset(box_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_LRCORNER)
-            # Edges
-            elif i == 0:
-                win.attrset(border_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_HLINE)
-            elif i == height - 1:
-                win.attrset(box_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_HLINE)
-            elif j == 0:
-                win.attrset(border_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_VLINE)
-            elif j == width - 1:
-                win.attrset(box_attr)
-                _safe_addch(win, win_y, win_x, curses.ACS_VLINE)
-            # Interior - don't fill, let caller handle background
-            else:
-                pass  # Interior is handled by caller
+    # Top border (left/top attr)
+    win.attrset(border_attr)
+    _safe_addch(win, y, x, curses.ACS_ULCORNER)
+    for j in range(x + 1, last_col):
+        _safe_addch(win, y, j, curses.ACS_HLINE)
+
+    # Top-right corner (right/bottom attr)
+    win.attrset(box_attr)
+    _safe_addch(win, y, last_col, curses.ACS_URCORNER)
+
+    # Side borders
+    for i in range(y + 1, last_row):
+        win.attrset(border_attr)
+        _safe_addch(win, i, x, curses.ACS_VLINE)
+        win.attrset(box_attr)
+        _safe_addch(win, i, last_col, curses.ACS_VLINE)
+
+    # Bottom border
+    win.attrset(border_attr)
+    _safe_addch(win, last_row, x, curses.ACS_LLCORNER)
+    win.attrset(box_attr)
+    for j in range(x + 1, last_col):
+        _safe_addch(win, last_row, j, curses.ACS_HLINE)
+    _safe_addch(win, last_row, last_col, curses.ACS_LRCORNER)
+
+
+def _draw_scrollbar(
+    win, scroll, max_scroll, x, y_start, height, track_style, thumb_style=None
+):
+    # Draws a vertical scrollbar with up/down arrows and a thumb indicator.
+    #
+    # win:          Window to draw in
+    # scroll:       Current scroll position
+    # max_scroll:   Maximum scroll position
+    # x:            Column to draw scrollbar in
+    # y_start:      Row for the first scrollbar element
+    # height:       Total height of scrollbar area (including arrows)
+    # track_style:  Style for arrows and track
+    # thumb_style:  Style for the thumb indicator (defaults to track_style)
+
+    if thumb_style is None:
+        thumb_style = track_style
+
+    # Calculate thumb position between the two arrows
+    if height > 2:
+        thumb_pos = 1 + int((float(scroll) / max_scroll) * (height - 3))
+    else:
+        thumb_pos = 1
+
+    for i in range(height):
+        y = y_start + i
+        if i == 0:
+            _safe_addch(win, y, x, curses.ACS_UARROW, track_style)
+        elif i == height - 1:
+            _safe_addch(win, y, x, curses.ACS_DARROW, track_style)
+        elif i == thumb_pos:
+            _safe_addch(win, y, x, ord(" "), thumb_style)
+        else:
+            _safe_addch(win, y, x, curses.ACS_VLINE, track_style)
+
+
+def _create_shadow_for_win(win, right_y_offset=1):
+    # Convenience wrapper: creates shadow windows from a curses window's
+    # position and size
+    y, x = win.getbegyx()
+    h, w = win.getmaxyx()
+    return _create_shadow_windows(y, x, h, w, right_y_offset)
 
 
 def _create_shadow_windows(y, x, height, width, right_y_offset=1):
@@ -2633,18 +2584,13 @@ def _jump_to_dialog():
         edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
     )
 
-    # Create shadow windows for the dialog area
-    # Calculate dialog area dimensions (edit_box + matches_win + bot_sep_win)
-    dialog_y = 0
-    dialog_x = 0
-    screen_height, screen_width = _stdscr.getmaxyx()
-    help_win_height = len(_JUMP_TO_HELP_LINES)
-    dialog_height = screen_height - help_win_height - 1  # Everything except help window
-    dialog_width = screen_width
+    def _jump_to_shadows():
+        # Shadow windows cover the dialog area (everything except help window)
+        sh, sw = _stdscr.getmaxyx()
+        dh = sh - len(_JUMP_TO_HELP_LINES) - 1
+        return _create_shadow_windows(0, 0, dh, sw, right_y_offset=1)
 
-    bottom_shadow, right_shadow = _create_shadow_windows(
-        dialog_y, dialog_x, dialog_height, dialog_width, right_y_offset=1
-    )
+    bottom_shadow, right_shadow = _jump_to_shadows()
 
     _safe_curs_set(2)
 
@@ -2785,14 +2731,7 @@ def _jump_to_dialog():
                 edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
             )
 
-            # Recreate shadow windows with new size
-            screen_height, screen_width = _stdscr.getmaxyx()
-            help_win_height = len(_JUMP_TO_HELP_LINES)
-            dialog_height = screen_height - help_win_height - 1
-            dialog_width = screen_width
-            bottom_shadow, right_shadow = _create_shadow_windows(
-                0, 0, dialog_height, dialog_width, right_y_offset=1
-            )
+            bottom_shadow, right_shadow = _jump_to_shadows()
 
         elif c == "\x06":  # \x06 = Ctrl-F
             if matches:
@@ -2804,14 +2743,7 @@ def _jump_to_dialog():
                     edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
                 )
 
-                # Recreate shadow windows after info dialog
-                screen_height, screen_width = _stdscr.getmaxyx()
-                help_win_height = len(_JUMP_TO_HELP_LINES)
-                dialog_height = screen_height - help_win_height - 1
-                dialog_width = screen_width
-                bottom_shadow, right_shadow = _create_shadow_windows(
-                    0, 0, dialog_height, dialog_width, right_y_offset=1
-                )
+                bottom_shadow, right_shadow = _jump_to_shadows()
 
         elif c == curses.KEY_DOWN:
             sel_node_i, scroll = select_next_match()
@@ -2998,58 +2930,16 @@ def _draw_jump_to_dialog(
 
         # Draw scrollbar if content is scrollable
         if max_scroll > 0:
-            scrollbar_x = matches_win_width - 2  # Inside right border
-            scrollbar_height = (
-                matches_win_height - 2
-            )  # Account for top and bottom borders
-
-            # Calculate scrollbar position (adjust for arrows at top and bottom)
-            # Use float() to ensure proper division in both Python 2 and 3
-            if scrollbar_height > 2:
-                scrollbar_pos = 1 + int(
-                    (float(scroll) / max_scroll) * (scrollbar_height - 3)
-                )
-            else:
-                scrollbar_pos = 1
-
-            # Draw scrollbar with arrows and track
-            for i in range(scrollbar_height):
-                if i == 0:
-                    # Top arrow (up)
-                    _safe_addch(
-                        matches_win,
-                        1 + i,
-                        scrollbar_x,
-                        curses.ACS_UARROW,
-                        _style["list"],
-                    )
-                elif i == scrollbar_height - 1:
-                    # Bottom arrow (down)
-                    _safe_addch(
-                        matches_win,
-                        1 + i,
-                        scrollbar_x,
-                        curses.ACS_DARROW,
-                        _style["list"],
-                    )
-                elif i == scrollbar_pos:
-                    # Draw thumb (current position) - use reverse video space for highlight
-                    _safe_addch(
-                        matches_win,
-                        1 + i,
-                        scrollbar_x,
-                        ord(" "),
-                        _style.get("selection", _style["list"]),
-                    )
-                else:
-                    # Draw track - use vertical line
-                    _safe_addch(
-                        matches_win,
-                        1 + i,
-                        scrollbar_x,
-                        curses.ACS_VLINE,
-                        _style["list"],
-                    )
+            _draw_scrollbar(
+                matches_win,
+                scroll,
+                max_scroll,
+                matches_win_width - 2,
+                1,
+                matches_win_height - 2,
+                _style["list"],
+                _style.get("selection", _style["list"]),
+            )
 
     else:
         # bad_re holds the error message from the re.error exception on errors
@@ -3113,20 +3003,13 @@ def _info_dialog(node, from_jump_to_dialog):
     # Give window its initial size
     _resize_info_dialog(win, node, lines)
 
-    # Create shadow windows once
-    win_y, win_x = win.getbegyx()
-    win_height, win_width = win.getmaxyx()
-    bottom_shadow, right_shadow = _create_shadow_windows(
-        win_y, win_x, win_height, win_width
-    )
+    bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
     while True:
-        # Draw main display behind dialog
         _draw_main()
 
         _draw_info_dialog(win, node, lines, scroll)
 
-        # Refresh shadow windows after dialog window to ensure they're on top
         _refresh_shadow_windows(bottom_shadow, right_shadow)
 
         curses.doupdate()
@@ -3136,12 +3019,7 @@ def _info_dialog(node, from_jump_to_dialog):
         if c == curses.KEY_RESIZE:
             _resize_main()
             _resize_info_dialog(win, node, lines)
-            # Recreate shadow windows with new dialog size
-            win_y, win_x = win.getbegyx()
-            win_height, win_width = win.getmaxyx()
-            bottom_shadow, right_shadow = _create_shadow_windows(
-                win_y, win_x, win_height, win_width
-            )
+            bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
         elif c in (curses.KEY_DOWN, "j", "J"):
             if scroll < _max_scroll_info(lines, win):
@@ -3177,12 +3055,7 @@ def _info_dialog(node, from_jump_to_dialog):
             # fullscreen jump-to dialog was open.
             _resize_main()
             _resize_info_dialog(win, node, lines)
-            # Recreate shadow windows
-            win_y, win_x = win.getbegyx()
-            win_height, win_width = win.getmaxyx()
-            bottom_shadow, right_shadow = _create_shadow_windows(
-                win_y, win_x, win_height, win_width
-            )
+            bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
         elif c in (
             curses.KEY_LEFT,
@@ -3200,19 +3073,24 @@ def _info_dialog(node, from_jump_to_dialog):
             return
 
 
+def _info_dialog_title(node):
+    # Returns the title string for an info dialog based on the node type
+
+    if isinstance(node.item, (Symbol, Choice)) and node.prompt:
+        return node.prompt[0]
+    if isinstance(node.item, Symbol) and node.item.name:
+        return node.item.name
+    if isinstance(node.item, Choice):
+        return "Choice"
+    return ""
+
+
 def _resize_info_dialog(win, node, lines):
     # Resizes the info dialog to appropriate size
 
     screen_height, screen_width = _stdscr.getmaxyx()
 
-    # Get title from prompt
-    title = ""
-    if isinstance(node.item, (Symbol, Choice)) and node.prompt:
-        title = node.prompt[0]
-    elif isinstance(node.item, Symbol) and node.item.name:
-        title = node.item.name
-    elif isinstance(node.item, Choice):
-        title = "Choice"
+    title = _info_dialog_title(node)
 
     # Calculate window dimensions
     # Height: border(1) + text lines + blank + separator(1) + button + border(1)
@@ -3232,62 +3110,37 @@ def _draw_info_dialog(win, node, lines, scroll):
 
     win_height, win_width = win.getmaxyx()
 
-    # Get title from prompt
-    title = ""
-    if isinstance(node.item, (Symbol, Choice)) and node.prompt:
-        title = node.prompt[0]
-    elif isinstance(node.item, Symbol) and node.item.name:
-        title = node.item.name
-    elif isinstance(node.item, Choice):
-        title = "Choice"
+    title = _info_dialog_title(node)
+
+    frame_style = _style.get("dialog-frame", _style["frame"])
 
     win.erase()
 
     # Draw box border with frame style
-    _draw_box(
-        win,
-        0,
-        0,
-        win_height,
-        win_width,
-        _style.get("dialog-frame", _style["frame"]),
-        _style.get("dialog-frame", _style["frame"]),
-    )
+    _draw_box(win, 0, 0, win_height, win_width, frame_style, frame_style)
 
-    # Draw title bar with blue background
+    # Draw title bar
     if title:
-        win.attron(_style.get("dialog-frame", _style["frame"]))
+        win.attron(frame_style)
         for i in range(1, win_width - 1):
             _safe_addch(win, 0, i, ord(" "))
-        title_x = (win_width - len(title)) // 2
-        _safe_addstr(win, 0, title_x, title)
-        win.attroff(_style.get("dialog-frame", _style["frame"]))
+        _safe_addstr(win, 0, (win_width - len(title)) // 2, title)
+        win.attroff(frame_style)
 
     # Draw horizontal separator line before buttons (height - 3)
-    win.attron(_style.get("dialog-frame", _style["frame"]))
+    win.attron(frame_style)
     _safe_addch(win, win_height - 3, 0, curses.ACS_LTEE)
     for i in range(1, win_width - 1):
         _safe_addch(win, win_height - 3, i, curses.ACS_HLINE)
     _safe_addch(win, win_height - 3, win_width - 1, curses.ACS_RTEE)
-    win.attroff(_style.get("dialog-frame", _style["frame"]))
+    win.attroff(frame_style)
 
-    # Calculate text area height (between border and separator)
-    text_area_height = (
-        win_height - 4
-    )  # -1 top border, -1 separator, -2 bottom (button + border)
-
-    # Calculate max scroll for scrollbar
+    # Text area height: between top border and separator
+    text_area_height = win_height - 4
     max_scroll = _max_scroll_info(lines, win)
 
-    # Determine text display width (leave space for scrollbar if needed)
-    if max_scroll > 0:
-        text_display_width = (
-            win_width - 5
-        )  # Leave space for scrollbar: border(1) + padding(1) + scrollbar(1) + padding(1) + border(1)
-    else:
-        text_display_width = (
-            win_width - 4
-        )  # Normal: border(1) + padding(1) on each side
+    # Leave extra space for scrollbar column when content is scrollable
+    text_display_width = win_width - (5 if max_scroll > 0 else 4)
 
     # Draw text content with body style
     for i in range(text_area_height):
@@ -3297,53 +3150,22 @@ def _draw_info_dialog(win, node, lines, scroll):
 
     # Draw scrollbar if content is scrollable
     if max_scroll > 0:
-        scrollbar_x = win_width - 2  # Right side, inside border
-        scrollbar_height = text_area_height
+        _draw_scrollbar(
+            win,
+            scroll,
+            max_scroll,
+            win_width - 2,
+            1,
+            text_area_height,
+            _style["body"],
+            _style.get("selection", _style["body"]),
+        )
 
-        # Calculate scrollbar position (adjust for arrows at top and bottom)
-        # Use float() to ensure proper division in both Python 2 and 3
-        if scrollbar_height > 2:
-            scrollbar_pos = 1 + int(
-                (float(scroll) / max_scroll) * (scrollbar_height - 3)
-            )
-        else:
-            scrollbar_pos = 1
-
-        # Draw scrollbar with arrows and track
-        for i in range(scrollbar_height):
-            y = 1 + i  # Start after top border
-            if i == 0:
-                # Top arrow (up)
-                _safe_addch(win, y, scrollbar_x, curses.ACS_UARROW, _style["body"])
-            elif i == scrollbar_height - 1:
-                # Bottom arrow (down)
-                _safe_addch(win, y, scrollbar_x, curses.ACS_DARROW, _style["body"])
-            elif i == scrollbar_pos:
-                # Draw thumb (current position) - use reverse video space for highlight
-                _safe_addch(
-                    win,
-                    y,
-                    scrollbar_x,
-                    ord(" "),
-                    _style.get("selection", _style["body"]),
-                )
-            else:
-                # Draw track - use vertical line
-                _safe_addch(win, y, scrollbar_x, curses.ACS_VLINE, _style["body"])
-
-    # Calculate and display scroll percentage in bottom right
-    # Use float() to ensure proper division in both Python 2 and 3
-    if max_scroll > 0:
-        percentage = int((float(scroll) / max_scroll) * 100)
-    else:
-        percentage = 100
+    # Scroll percentage in bottom right
+    percentage = int((float(scroll) / max_scroll) * 100) if max_scroll > 0 else 100
     percent_str = "({:3d}%)".format(percentage)
     _safe_addstr(
-        win,
-        win_height - 2,
-        win_width - len(percent_str) - 2,
-        percent_str,
-        _style.get("dialog-frame", _style["frame"]),
+        win, win_height - 2, win_width - len(percent_str) - 2, percent_str, frame_style
     )
 
     # Draw Exit button at bottom
@@ -3352,7 +3174,7 @@ def _draw_info_dialog(win, node, lines, scroll):
     button_x = (win_width - len(button_label) - 2) // 2
 
     # Fill button row with frame background
-    win.attrset(_style.get("dialog-frame", _style["frame"]))
+    win.attrset(frame_style)
     for i in range(1, win_width - 1):
         _safe_addch(win, button_y, i, ord(" "))
 
@@ -3373,85 +3195,44 @@ def _max_scroll_info(lines, win):
 def _info_str_mconf(node):
     # Returns information about the menu node 'node' in mconf format.
 
+    # sc = symbol/choice, or None for MENU/COMMENT
+    sc = node.item if isinstance(node.item, (Symbol, Choice)) else None
+
+    lines = []
+
+    # Help text first (or "no help available")
+    if sc and sc.nodes and sc.nodes[0].help:
+        lines.append(sc.nodes[0].help.rstrip())
+    else:
+        lines.append("There is no help available for this option.")
+
+    lines.append("")
+
+    # Symbol/choice-specific header line
     if isinstance(node.item, Symbol):
         sym = node.item
-
-        # Build info string
-        lines = []
-
-        # Help text first (or "no help available")
-        if sym.nodes and sym.nodes[0].help:
-            lines.append(sym.nodes[0].help.rstrip())
-        else:
-            lines.append("There is no help available for this option.")
-
-        lines.append("")
-
-        # Symbol info
         value_str = sym.str_value
-        if sym.orig_type == BOOL or sym.orig_type == TRISTATE:
-            value_str = (
-                "y" if sym.tri_value == 2 else ("m" if sym.tri_value == 1 else "n")
-            )
+        if sym.orig_type in (BOOL, TRISTATE):
+            value_str = TRI_TO_STR[sym.tri_value]
         lines.append(
             "Symbol: {} [={}]".format(sym.name if sym.name else "<unnamed>", value_str)
         )
-
-        # Type
-        type_str = TYPE_TO_STR[sym.orig_type].lower()
-        lines.append("Type  : {}".format(type_str))
-
-        # Prompt
-        if node.prompt:
-            lines.append("Prompt: {}".format(node.prompt[0]))
-
-        # Location
-        if sym.nodes:
-            lines.append(
-                "  Defined at {}:{}".format(sym.nodes[0].filename, sym.nodes[0].linenr)
-            )
-
-        return "\n".join(lines)
-
     elif isinstance(node.item, Choice):
-        choice = node.item
+        if node.item.name:
+            lines.append("Choice: {}".format(node.item.name))
 
-        lines = []
+    # Type, prompt, and location are common to Symbol and Choice
+    if sc:
+        lines.append("Type  : {}".format(TYPE_TO_STR[sc.orig_type].lower()))
 
-        # Help text first
-        if choice.nodes and choice.nodes[0].help:
-            lines.append(choice.nodes[0].help.rstrip())
-        else:
-            lines.append("There is no help available for this option.")
-
-        lines.append("")
-
-        # Choice info
-        if choice.name:
-            lines.append("Choice: {}".format(choice.name))
-
-        # Type
-        type_str = TYPE_TO_STR[choice.orig_type].lower()
-        lines.append("Type  : {}".format(type_str))
-
-        # Prompt
-        if node.prompt:
-            lines.append("Prompt: {}".format(node.prompt[0]))
-
-        # Location
-        if choice.nodes:
-            lines.append(
-                "  Defined at {}:{}".format(
-                    choice.nodes[0].filename, choice.nodes[0].linenr
-                )
-            )
-
-        return "\n".join(lines)
-
-    # For MENU and COMMENT
-    lines = ["There is no help available for this option.", ""]
     if node.prompt:
         lines.append("Prompt: {}".format(node.prompt[0]))
+
+    if sc and sc.nodes:
+        lines.append(
+            "  Defined at {}:{}".format(sc.nodes[0].filename, sc.nodes[0].linenr)
+        )
+
     return "\n".join(lines)
 
 
@@ -4236,20 +4017,6 @@ def _safe_addstr(win, *args):
 def _safe_addch(win, *args):
     try:
         win.addch(*args)
-    except curses.error:
-        pass
-
-
-def _safe_hline(win, *args):
-    try:
-        win.hline(*args)
-    except curses.error:
-        pass
-
-
-def _safe_vline(win, *args):
-    try:
-        win.vline(*args)
     except curses.error:
         pass
 

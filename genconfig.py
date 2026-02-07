@@ -32,12 +32,12 @@ See https://www.gnu.org/software/make/manual/make.html#Multi_002dLine for a
 handy way to define multi-line variables in makefiles, for use with custom
 headers. Remember to export the variable to the environment.
 """
+
 import argparse
 import os
 import sys
 
 import kconfiglib
-
 
 DEFAULT_SYNC_DEPS_PATH = "deps/"
 
@@ -119,17 +119,16 @@ only supported for backwards compatibility).
     kconf = kconfiglib.Kconfig(args.kconfig, suppress_traceback=True)
     kconf.load_config()
 
-    if args.header_path is None:
-        if "KCONFIG_AUTOHEADER" in os.environ:
-            kconf.write_autoconf()
-        else:
-            # Kconfiglib defaults to include/generated/autoconf.h to be
-            # compatible with the C tools. 'config.h' is used here instead for
-            # backwards compatibility. It's probably a saner default for tools
-            # as well.
-            kconf.write_autoconf("config.h")
-    else:
+    if args.header_path is not None:
         kconf.write_autoconf(args.header_path)
+    elif "KCONFIG_AUTOHEADER" in os.environ:
+        kconf.write_autoconf()
+    else:
+        # Kconfiglib defaults to include/generated/autoconf.h to be
+        # compatible with the C tools. 'config.h' is used here instead for
+        # backwards compatibility. It's probably a saner default for tools
+        # as well.
+        kconf.write_autoconf("config.h")
 
     if args.config_out is not None:
         kconf.write_config(args.config_out, save_old=False)

@@ -15,6 +15,7 @@ passed in the KCONFIG_CONFIG environment variable.
 When overwriting a configuration file, the old version is saved to
 <filename>.old (e.g. .config.old).
 """
+
 import kconfiglib
 
 

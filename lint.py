@@ -50,24 +50,32 @@ def name_and_locs(sym):
     )
 
 
-def check_always_n(print_separator):
-    results = []
-    for sym in kconf.unique_defined_syms:
-        if (
-            not has_prompt(sym)
-            and not is_selected_or_implied(sym)
-            and not has_defaults(sym)
-        ):
-            results.append(name_and_locs(sym))
+def print_results(header, results, print_separator):
+    # Prints a list of results with a header and optional leading separator.
+    # Returns True if any results were printed, False otherwise.
 
-    if results:
-        if print_separator:
-            print()
-        print_header("Symbols that can't be anything but n/empty")
-        for result in results:
-            print(result)
-        return True
-    return False
+    if not results:
+        return False
+
+    if print_separator:
+        print()
+    print_header(header)
+    for result in results:
+        print(result, end="" if result.endswith("\n") else "\n")
+    return True
+
+
+def check_always_n(print_separator):
+    results = [
+        name_and_locs(sym)
+        for sym in kconf.unique_defined_syms
+        if not has_prompt(sym)
+        and not is_selected_or_implied(sym)
+        and not has_defaults(sym)
+    ]
+    return print_results(
+        "Symbols that can't be anything but n/empty", results, print_separator
+    )
 
 
 def referenced_in_kconfig():
@@ -98,9 +106,6 @@ def run(cmd, cwd=None, check=True):
     # Runs 'cmd' with subprocess, returning the decoded stdout output.
     # 'cwd' is the working directory. Exits with an error if the command
     # exits with a non-zero return code if 'check' is True.
-
-    if cwd is None:
-        cwd = os.getcwd()
 
     cmd_s = " ".join(shlex.quote(word) for word in cmd)
 
@@ -182,60 +187,39 @@ def is_selecting_or_implying(sym):
 
 
 def check_unused(search_dirs, print_separator):
-    results = []
     referenced = referenced_sym_names(search_dirs)
-    for sym in kconf.unique_defined_syms:
-        if (
-            not is_selecting_or_implying(sym)
-            and not sym.choice
-            and sym.name not in referenced
-        ):
-            results.append(name_and_locs(sym))
-
-    if results:
-        if print_separator:
-            print()
-        print_header("Symbols that look unused")
-        for result in results:
-            print(result)
-        return True
-    return False
+    results = [
+        name_and_locs(sym)
+        for sym in kconf.unique_defined_syms
+        if not is_selecting_or_implying(sym)
+        and not sym.choice
+        and sym.name not in referenced
+    ]
+    return print_results("Symbols that look unused", results, print_separator)
 
 
 def check_pointless_menuconfigs(print_separator):
-    results = []
-    for node in kconf.node_iter():
-        if (
-            node.is_menuconfig
-            and not node.list
-            and isinstance(node.item, kconfiglib.Symbol)
-        ):
-            results.append("{0.item.name:40} {0.filename}:{0.linenr}".format(node))
-
-    if results:
-        if print_separator:
-            print()
-        print_header("menuconfig symbols with empty menus")
-        for result in results:
-            print(result)
-        return True
-    return False
+    results = [
+        "{0.item.name:40} {0.filename}:{0.linenr}".format(node)
+        for node in kconf.node_iter()
+        if node.is_menuconfig
+        and not node.list
+        and isinstance(node.item, kconfiglib.Symbol)
+    ]
+    return print_results(
+        "menuconfig symbols with empty menus", results, print_separator
+    )
 
 
 def check_defconfig_only_definition(print_separator):
-    results = []
-    for sym in kconf.unique_defined_syms:
-        if all("defconfig" in node.filename for node in sym.nodes):
-            results.append(name_and_locs(sym))
-
-    if results:
-        if print_separator:
-            print()
-        print_header("Symbols only defined in Kconfig.defconfig files")
-        for result in results:
-            print(result)
-        return True
-    return False
+    results = [
+        name_and_locs(sym)
+        for sym in kconf.unique_defined_syms
+        if all("defconfig" in node.filename for node in sym.nodes)
+    ]
+    return print_results(
+        "Symbols only defined in Kconfig.defconfig files", results, print_separator
+    )
 
 
 def split_list(lst, batch_size):
@@ -293,14 +277,11 @@ def check_missing_config_prefix(search_dirs, print_separator):
             except:
                 pass
 
-    if results:
-        if print_separator:
-            print()
-        print_header("Symbol references that might be missing a CONFIG_ prefix")
-        for result in results:
-            print(result, end="")
-        return True
-    return False
+    return print_results(
+        "Symbol references that might be missing a CONFIG_ prefix",
+        results,
+        print_separator,
+    )
 
 
 def parse_args():
@@ -430,12 +411,14 @@ def main():
     except Exception as e:
         err("Failed to load Kconfig: {}".format(e))
 
-    # Determine which checks to run
-    if args.checks:
-        check_names = args.checks
-    else:
-        # Run all checks if no checks were specified
-        check_names = ["always_n", "unused", "menuconfigs", "defconfig", "prefix"]
+    # Run all checks if none were specified on the command line
+    check_names = args.checks or [
+        "always_n",
+        "unused",
+        "menuconfigs",
+        "defconfig",
+        "prefix",
+    ]
 
     # Map check names to functions
     check_map = {
@@ -448,8 +431,7 @@ def main():
 
     had_output = False
     for check_name in check_names:
-        if check_map[check_name](had_output):
-            had_output = True
+        had_output |= check_map[check_name](had_output)
 
 
 if __name__ == "__main__":
