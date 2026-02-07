@@ -3,7 +3,6 @@ import os
 
 import setuptools
 
-
 # Make sure that README.md decodes on Python 3 in environments that use
 # the C locale (which implies ASCII), by explicitly giving the encoding.
 #

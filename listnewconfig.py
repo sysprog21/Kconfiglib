@@ -11,6 +11,7 @@ Kconfig files.
 The default configuration filename is '.config'. A different filename can be
 passed in the KCONFIG_CONFIG environment variable.
 """
+
 from __future__ import print_function
 
 import argparse

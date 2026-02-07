@@ -101,7 +101,6 @@ from kconfiglib import (
     standard_config_filename,
 )
 
-
 # If True, use GIF image data embedded in this file instead of separate GIF
 # files. See _load_images().
 _USE_EMBEDDED_IMAGES = True
@@ -176,11 +175,7 @@ class ThemeManager:
 
     def toggle(self):
         """Toggle between light and dark themes"""
-        self.current_theme = "dark" if self.current_theme == "light" else "light"
-        self.colors = (
-            CUSTOMTKINTER_DARK if self.current_theme == "dark" else CUSTOMTKINTER_LIGHT
-        )
-        self.apply()
+        self.set_theme("dark" if self.current_theme == "light" else "light")
 
     def set_theme(self, theme_name):
         """Set specific theme: 'light' or 'dark'"""
@@ -680,13 +675,6 @@ def _init_misc_ui():
     _root.minsize(128, 128)
     _root.protocol("WM_DELETE_WINDOW", _on_quit)
 
-    # Use the 'clam' theme on *nix if it's available. It looks nicer than the
-    # 'default' theme.
-    if _root.tk.call("tk", "windowingsystem") == "x11":
-        style = ttk.Style()
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-
 
 def _create_menubar():
     # Creates the menu bar at the top of the window
@@ -776,10 +764,8 @@ def _create_top_widgets():
     file_inner.pack(fill="both", expand=True, padx=5, pady=5)
 
     # Configure column weights for responsive layout
-    file_inner.columnconfigure(0, weight=1)
-    file_inner.columnconfigure(1, weight=1)
-    file_inner.columnconfigure(2, weight=1)
-    file_inner.columnconfigure(3, weight=1)
+    for col in range(4):
+        file_inner.columnconfigure(col, weight=1)
 
     ttk.Button(file_inner, text="Save", command=_save).grid(
         column=0, row=0, sticky="ew", padx="2", pady="2"
@@ -816,9 +802,8 @@ def _create_top_widgets():
     options_inner.pack(fill="both", expand=True, padx=5, pady=5)
 
     # Configure column weights to ensure proper expansion
-    options_inner.columnconfigure(0, weight=1)
-    options_inner.columnconfigure(1, weight=1)
-    options_inner.columnconfigure(2, weight=1)
+    for col in range(3):
+        options_inner.columnconfigure(col, weight=1)
     options_inner.columnconfigure(3, weight=0)  # Theme button: fixed width
 
     ttk.Checkbutton(
@@ -949,7 +934,6 @@ def _create_kconfig_tree(parent):
 
     tree.tag_configure("n-bool", image=_n_bool_img)
     tree.tag_configure("y-bool", image=_y_bool_img)
-    tree.tag_configure("m-tri", image=_m_tri_img)
     tree.tag_configure("n-tri", image=_n_tri_img)
     tree.tag_configure("m-tri", image=_m_tri_img)
     tree.tag_configure("y-tri", image=_y_tri_img)
@@ -1284,10 +1268,11 @@ def _get_force_info(sym):
         return None
 
     # Show up to 2 symbols to keep line length reasonable
-    if len(sym_names) <= 2:
-        return " [{} {}]".format(prefix, ", ".join(sym_names))
+    shown = ", ".join(sym_names[:2])
+    if len(sym_names) > 2:
+        shown += ", +{}".format(len(sym_names) - 2)
 
-    return " [{} {}, +{}]".format(prefix, ", ".join(sym_names[:2]), len(sym_names) - 2)
+    return " [{} {}]".format(prefix, shown)
 
 
 def _extract_controlling_symbols(expr_list):
@@ -1368,19 +1353,11 @@ def _node_str(node):
         # choices in y mode
         sym = node.item.selection
         if sym:
-            for sym_node in sym.nodes:
-                # Use the prompt used at this choice location, in case the
-                # choice symbol is defined in multiple locations
-                if sym_node.parent is node and sym_node.prompt:
-                    s += " ({})".format(sym_node.prompt[0])
-                    break
-            else:
-                # If the symbol isn't defined at this choice location, then
-                # just use whatever prompt we can find for it
-                for sym_node in sym.nodes:
-                    if sym_node.prompt:
-                        s += " ({})".format(sym_node.prompt[0])
-                        break
+            # Use the prompt at this choice location if available, otherwise
+            # fall back to whatever prompt we can find for the symbol
+            prompt = _choice_sym_prompt(sym, node)
+            if prompt:
+                s += " ({})".format(prompt)
 
     # In single-menu mode, print "--->" next to nodes that have menus that can
     # potentially be entered. Print "----" if the menu is empty. We don't allow
@@ -1389,6 +1366,23 @@ def _node_str(node):
         s += "  --->" if _shown_menu_nodes(node) else "  ----"
 
     return s
+
+
+def _choice_sym_prompt(sym, choice_node):
+    # Returns the prompt string for 'sym' at the given choice location, or any
+    # prompt if the symbol isn't defined at that location. Returns None if the
+    # symbol has no prompt at all.
+
+    for sym_node in sym.nodes:
+        if sym_node.parent is choice_node and sym_node.prompt:
+            return sym_node.prompt[0]
+
+    # Fall back to whatever prompt we can find
+    for sym_node in sym.nodes:
+        if sym_node.prompt:
+            return sym_node.prompt[0]
+
+    return None
 
 
 def _img_tag(node):
@@ -1767,12 +1761,14 @@ def _set_val_dialog(node, parent):
             column=0, row=2, columnspan=2, sticky="w", padx=".3c", pady=".2c 0"
         )
 
+    button_row = 4 if range_info else 3
+
     ttk.Button(dialog, text="OK", command=ok).grid(
-        column=0, row=4 if range_info else 3, sticky="e", padx=".3c", pady=".4c"
+        column=0, row=button_row, sticky="e", padx=".3c", pady=".4c"
     )
 
     ttk.Button(dialog, text="Cancel", command=cancel).grid(
-        column=1, row=4 if range_info else 3, padx="0 .3c"
+        column=1, row=button_row, padx="0 .3c"
     )
 
     # Give all horizontal space to the grid cell with the OK button, so that
@@ -1826,14 +1822,8 @@ def _center_on_root(dialog):
     y = _root.winfo_rooty() + (_root.winfo_height() - dialog_height) // 2
 
     # Clamp so that no part of the dialog is outside the screen
-    if x + dialog_width > screen_width:
-        x = screen_width - dialog_width
-    elif x < 0:
-        x = 0
-    if y + dialog_height > screen_height:
-        y = screen_height - dialog_height
-    elif y < 0:
-        y = 0
+    x = max(0, min(x, screen_width - dialog_width))
+    y = max(0, min(y, screen_height - dialog_height))
 
     dialog.geometry("+{}+{}".format(x, y))
 
@@ -1905,21 +1895,11 @@ def _save_as():
 
     global _conf_filename
 
-    filename = _conf_filename
-    while True:
-        filename = filedialog.asksaveasfilename(
-            title="Save configuration as",
-            initialdir=os.path.dirname(filename),
-            initialfile=os.path.basename(filename),
-            parent=_root,
-        )
-
-        if not filename:
-            break
-
-        if _try_save(_kconf.write_config, filename, "configuration"):
-            _conf_filename = filename
-            break
+    result = _save_dialog(
+        "Save configuration as", _conf_filename, _kconf.write_config, "configuration"
+    )
+    if result:
+        _conf_filename = result
 
     _tree.focus_set()
 
@@ -1930,24 +1910,36 @@ def _save_minimal():
 
     global _minconf_filename
 
-    filename = _minconf_filename
+    result = _save_dialog(
+        "Save minimal configuration as",
+        _minconf_filename,
+        _kconf.write_min_config,
+        "minimal configuration",
+    )
+    if result:
+        _minconf_filename = result
+
+    _tree.focus_set()
+
+
+def _save_dialog(title, initial_filename, save_fn, description):
+    # Shared helper for _save_as() and _save_minimal(). Pops up a save dialog
+    # and tries to save. Returns the chosen filename on success, or None.
+
+    filename = initial_filename
     while True:
         filename = filedialog.asksaveasfilename(
-            title="Save minimal configuration as",
+            title=title,
             initialdir=os.path.dirname(filename),
             initialfile=os.path.basename(filename),
             parent=_root,
         )
 
         if not filename:
-            break
+            return None
 
-        if _try_save(_kconf.write_min_config, filename, "minimal configuration"):
-
-            _minconf_filename = filename
-            break
-
-    _tree.focus_set()
+        if _try_save(save_fn, filename, description):
+            return filename
 
 
 def _open(_=None):
@@ -1998,11 +1990,9 @@ def _toggle_theme(_):
     _theme_manager.toggle()
 
     # Update button text to reflect current theme
-    global _theme_button
-    if _theme_manager.current_theme == "dark":
-        _theme_button.configure(text="🌙 Dark")
-    else:
-        _theme_button.configure(text="☀ Light")
+    _theme_button.configure(
+        text="🌙 Dark" if _theme_manager.current_theme == "dark" else "☀ Light"
+    )
 
     _update_tree()
     _tree.focus_set()
@@ -2145,18 +2135,10 @@ def _enter_menu(menu):
 def _leave_menu():
     # Leaves the current menu. Used in single-menu mode.
 
-    global _cur_menu
-
     if _cur_menu is not _kconf.top_node:
         old_menu = _cur_menu
-
-        _cur_menu = _parent_menu(_cur_menu)
-        _update_tree()
-
+        _enter_menu(_parent_menu(old_menu))
         _select(_tree, id(old_menu))
-
-        if _cur_menu is _kconf.top_node:
-            _backbutton["state"] = "disabled"
 
     _tree.focus_set()
 
@@ -2250,25 +2232,23 @@ def _on_quit(_=None):
         return
 
     # Adjust dialog message if .config doesn't exist
-    if not config_exists:
-        dialog_title = "Quit"
+    if config_exists:
+        dialog_message = "Save changes?"
+    else:
         dialog_message = (
             "No configuration file found.\nSave new configuration before quitting?"
         )
-    else:
-        dialog_title = "Quit"
-        dialog_message = "Save changes?"
 
     while True:
-        ync = messagebox.askyesnocancel(dialog_title, dialog_message)
+        ync = messagebox.askyesnocancel("Quit", dialog_message)
         if ync is None:
             return
 
         if not ync:
-            if not config_exists:
-                _quit("Configuration was not saved")
-            else:
-                _quit("Configuration ({}) was not saved".format(_conf_filename))
+            msg = "Configuration was not saved"
+            if config_exists:
+                msg = "Configuration ({}) was not saved".format(_conf_filename)
+            _quit(msg)
             return
 
         if _try_save(_kconf.write_config, _conf_filename, "configuration"):
@@ -2720,12 +2700,9 @@ def _value_info(sym):
     origin = sym.origin
     if origin:
         kind, sources = origin
-        if kind == "select":
-            if sources:
-                s += "  (selected by: {})\n".format(", ".join(sources))
-        elif kind == "imply":
-            if sources:
-                s += "  (implied by: {})\n".format(", ".join(sources))
+        if kind in ("select", "imply") and sources:
+            verb = "selected by" if kind == "select" else "implied by"
+            s += "  ({}: {})\n".format(verb, ", ".join(sources))
         elif kind == "default":
             s += "  (from default)\n"
         elif kind == "assign":
@@ -2769,12 +2746,11 @@ def _direct_dep_info(sc):
     # definition location. The dependencies at each definition location come
     # from 'depends on' and dependencies inherited from parent items.
 
-    return (
-        ""
-        if sc.direct_dep is _kconf.y
-        else "Direct dependencies (={}):\n{}\n".format(
-            TRI_TO_STR[expr_value(sc.direct_dep)], _split_expr_info(sc.direct_dep, 2)
-        )
+    if sc.direct_dep is _kconf.y:
+        return ""
+
+    return "Direct dependencies (={}):\n{}\n".format(
+        TRI_TO_STR[expr_value(sc.direct_dep)], _split_expr_info(sc.direct_dep, 2)
     )
 
 
@@ -2784,10 +2760,7 @@ def _defaults_info(sc):
     if not sc.defaults:
         return ""
 
-    s = "Default"
-    if len(sc.defaults) > 1:
-        s += "s"
-    s += ":\n"
+    s = "Default{}:\n".format("s" if len(sc.defaults) > 1 else "")
 
     for val, cond in sc.orig_defaults:
         s += "  - "
@@ -2863,21 +2836,20 @@ def _select_imply_info(sym):
 
     s = ""
 
-    if sym.rev_dep is not _kconf.n:
-        s += sis(sym.rev_dep, 2, "Symbols currently y-selecting this symbol:\n")
-        s += sis(sym.rev_dep, 1, "Symbols currently m-selecting this symbol:\n")
-        s += sis(
-            sym.rev_dep, 0, "Symbols currently n-selecting this symbol (no effect):\n"
-        )
-
-    if sym.weak_rev_dep is not _kconf.n:
-        s += sis(sym.weak_rev_dep, 2, "Symbols currently y-implying this symbol:\n")
-        s += sis(sym.weak_rev_dep, 1, "Symbols currently m-implying this symbol:\n")
-        s += sis(
-            sym.weak_rev_dep,
-            0,
-            "Symbols currently n-implying this symbol (no effect):\n",
-        )
+    for dep, verb in ((sym.rev_dep, "selecting"), (sym.weak_rev_dep, "implying")):
+        if dep is not _kconf.n:
+            for val, prefix, suffix in (
+                (2, "y-", ""),
+                (1, "m-", ""),
+                (0, "n-", " (no effect)"),
+            ):
+                s += sis(
+                    dep,
+                    val,
+                    "Symbols currently {}{} this symbol{}:\n".format(
+                        prefix, verb, suffix
+                    ),
+                )
 
     return s
 

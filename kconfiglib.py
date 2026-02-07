@@ -543,6 +543,7 @@ Feedback
 For bug reports, suggestions, and questions, please open a ticket on the GitHub
 page.
 """
+
 import errno
 import importlib
 import os
@@ -552,7 +553,6 @@ import sys
 # Get rid of some attribute lookups. These are obvious in context.
 from glob import iglob
 from os.path import dirname, exists, expandvars, islink, join, realpath
-
 
 VERSION = (14, 1, 0)
 
@@ -1945,7 +1945,7 @@ class Kconfig(object):
                             continue
                         val = unescape(match.group(1))
 
-                    self.syms[name]._old_val = val
+                    sym._old_val = val
                 else:
                     # Flag that the symbol no longer exists, in
                     # case something still depends on it
@@ -1968,12 +1968,14 @@ class Kconfig(object):
     def _old_vals_contents(self):
         # _write_old_vals() helper. Returns the contents to write as a string.
 
-        # Temporary list instead of generator makes this a bit faster
+        # Temporary list instead of generator makes this a bit faster.
+        # Skip n-valued bool/tristate symbols (they don't get written to
+        # auto.conf or autoconf.h).
         return "".join(
             [
                 sym.config_string
                 for sym in self.unique_defined_syms
-                if not (sym.orig_type in _BOOL_TRISTATE and not sym.tri_value)
+                if sym.orig_type not in _BOOL_TRISTATE or sym.tri_value
             ]
         )
 
@@ -2934,7 +2936,7 @@ class Kconfig(object):
                 )
 
             var._n_expansions += 1
-            res = self._expand_whole(self.variables[fn].value, args)
+            res = self._expand_whole(var.value, args)
             var._n_expansions -= 1
             return res
 
@@ -3213,32 +3215,27 @@ class Kconfig(object):
             else:
                 # A valid endchoice/endif/endmenu is caught by the 'end_token'
                 # check above
-                self._parse_error(
-                    "no corresponding 'choice'"
-                    if t0 is _T_ENDCHOICE
-                    else (
-                        "no corresponding 'if'"
-                        if t0 is _T_ENDIF
-                        else (
-                            "no corresponding 'menu'"
-                            if t0 is _T_ENDMENU
-                            else "unrecognized construct"
-                        )
-                    )
-                )
+                if t0 is _T_ENDCHOICE:
+                    msg = "no corresponding 'choice'"
+                elif t0 is _T_ENDIF:
+                    msg = "no corresponding 'if'"
+                elif t0 is _T_ENDMENU:
+                    msg = "no corresponding 'menu'"
+                else:
+                    msg = "unrecognized construct"
+                self._parse_error(msg)
 
         # End of file reached. Return the last node.
 
         if end_token:
+            if end_token is _T_ENDCHOICE:
+                end_str = "endchoice"
+            elif end_token is _T_ENDIF:
+                end_str = "endif"
+            else:
+                end_str = "endmenu"
             raise KconfigError(
-                "error: expected '{}' at end of '{}'".format(
-                    (
-                        "endchoice"
-                        if end_token is _T_ENDCHOICE
-                        else "endif" if end_token is _T_ENDIF else "endmenu"
-                    ),
-                    self.filename,
-                )
+                "error: expected '{}' at end of '{}'".format(end_str, self.filename)
             )
 
         return prev
@@ -3431,7 +3428,7 @@ class Kconfig(object):
                 elif self._check_token(_T_ALLNOCONFIG_Y):
                     if node.item.__class__ is not Symbol:
                         self._parse_error(
-                            "the 'allnoconfig_y' option is only " "valid for symbols"
+                            "the 'allnoconfig_y' option is only valid for symbols"
                         )
 
                     node.item.is_allnoconfig_y = True
@@ -3954,30 +3951,21 @@ class Kconfig(object):
 
         for sym in self.unique_defined_syms:
             if sym.orig_type in _BOOL_TRISTATE:
-                # A helper function could be factored out here, but keep it
-                # speedy/straightforward
-
-                for target_sym, _, _ in sym.selects:
-                    if target_sym.orig_type not in _BOOL_TRISTATE_UNKNOWN:
-                        self._warn(
-                            "{} selects the {} symbol {}, which is not "
-                            "bool or tristate".format(
-                                sym.name_and_loc,
-                                TYPE_TO_STR[target_sym.orig_type],
-                                target_sym.name_and_loc,
+                for rel, rel_name in (
+                    (sym.selects, "selects"),
+                    (sym.implies, "implies"),
+                ):
+                    for target_sym, _, _ in rel:
+                        if target_sym.orig_type not in _BOOL_TRISTATE_UNKNOWN:
+                            self._warn(
+                                "{} {} the {} symbol {}, which is not "
+                                "bool or tristate".format(
+                                    sym.name_and_loc,
+                                    rel_name,
+                                    TYPE_TO_STR[target_sym.orig_type],
+                                    target_sym.name_and_loc,
+                                )
                             )
-                        )
-
-                for target_sym, _, _ in sym.implies:
-                    if target_sym.orig_type not in _BOOL_TRISTATE_UNKNOWN:
-                        self._warn(
-                            "{} implies the {} symbol {}, which is not "
-                            "bool or tristate".format(
-                                sym.name_and_loc,
-                                TYPE_TO_STR[target_sym.orig_type],
-                                target_sym.name_and_loc,
-                            )
-                        )
 
             elif sym.orig_type:  # STRING/INT/HEX
                 for default, _, _ in sym.defaults:
@@ -6453,23 +6441,18 @@ def expr_value(expr):
             # parse as numbers
             comp = _strcmp(v1.str_value, v2.str_value)
 
-    return 2 * (
-        comp == 0
-        if rel is EQUAL
-        else (
-            comp != 0
-            if rel is UNEQUAL
-            else (
-                comp < 0
-                if rel is LESS
-                else (
-                    comp <= 0
-                    if rel is LESS_EQUAL
-                    else comp > 0 if rel is GREATER else comp >= 0
-                )
-            )
-        )
-    )
+    if rel is EQUAL:
+        return 2 * (comp == 0)
+    if rel is UNEQUAL:
+        return 2 * (comp != 0)
+    if rel is LESS:
+        return 2 * (comp < 0)
+    if rel is LESS_EQUAL:
+        return 2 * (comp <= 0)
+    if rel is GREATER:
+        return 2 * (comp > 0)
+    # rel is GREATER_EQUAL
+    return 2 * (comp >= 0)
 
 
 def standard_sc_expr_str(sc):
@@ -6841,12 +6824,9 @@ def _save_old(path):
     # Import as needed, to save some startup time
     import shutil
 
-    def copy(src, dst):
-        shutil.copyfile(src, dst)
-
     if islink(path):
         # Preserve symlinks
-        copy_fn = copy
+        copy_fn = shutil.copyfile
     elif hasattr(os, "replace"):
         # Python 3 (3.3+) only. Best choice when available, because it
         # removes <filename>.old on both *nix and Windows.
@@ -6856,7 +6836,7 @@ def _save_old(path):
         copy_fn = os.rename
     else:
         # Fall back on copying
-        copy_fn = copy
+        copy_fn = shutil.copyfile
 
     try:
         copy_fn(path, path + ".old")
@@ -7122,7 +7102,7 @@ def _found_dep_loop(loop, cur):
 
     # Yep, we have the entire loop. Throw an exception that shows it.
 
-    msg = "\nDependency loop\n" "===============\n\n"
+    msg = "\nDependency loop\n===============\n\n"
 
     for item in loop:
         if item is not loop[0]:
@@ -7260,189 +7240,112 @@ def _shell_fn(kconf, _, command):
     return "\n".join(stdout.splitlines()).rstrip("\n").replace("\n", " ")
 
 
-def _success_fn(kconf, _, command):
-    # Returns 'y' if the shell command exits with 0, otherwise 'n'
-    # This is the fundamental building block for other Kbuild test functions
+def _run_cmd(command):
+    # Runs 'command' in a shell and returns True if it exits with 0.
+    # Returns False on any error (non-zero exit or exception).
     import subprocess
 
     try:
-        # Run command, suppress output
         proc = subprocess.Popen(
             command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         proc.communicate()
-        return "y" if proc.returncode == 0 else "n"
+        return proc.returncode == 0
     except Exception:
-        return "n"
+        return False
+
+
+def _run_cmd_in_tmpdir(cmd_fmt):
+    # Creates a temporary directory, formats 'cmd_fmt' with it, runs the
+    # command, and cleans up. Returns True if the command exits with 0.
+    import tempfile
+
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp()
+        return _run_cmd(cmd_fmt.replace("{tmpdir}", tmpdir))
+    except Exception:
+        return False
+    finally:
+        if tmpdir:
+            try:
+                import shutil
+
+                shutil.rmtree(tmpdir)
+            except Exception:
+                pass
+
+
+def _success_fn(kconf, _, command):
+    return "y" if _run_cmd(command) else "n"
 
 
 def _cc_option_fn(kconf, _, option, fallback=""):
-    # Test if the C compiler supports a given option
-    # Returns 'y' if supported, 'n' otherwise
-    import subprocess
-    import tempfile
-    import os
-
     cc = os.environ.get("CC", "gcc")
-
-    tmpdir = None
-    try:
-        tmpdir = tempfile.mkdtemp()
-        cmd = ("{} -Werror {} -c -x c /dev/null -o {}/tmp.o 2>/dev/null").format(
-            cc, option, tmpdir
+    return (
+        "y"
+        if _run_cmd_in_tmpdir(
+            cc
+            + " -Werror "
+            + option
+            + " -c -x c /dev/null -o {tmpdir}/tmp.o 2>/dev/null"
         )
-
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return "y" if proc.returncode == 0 else "n"
-    except Exception:
-        return "n"
-    finally:
-        if tmpdir:
-            try:
-                import shutil
-
-                shutil.rmtree(tmpdir)
-            except Exception:
-                pass
+        else "n"
+    )
 
 
 def _ld_option_fn(kconf, _, option):
-    # Test if the linker supports a given option
-    # Returns 'y' if supported, 'n' otherwise
-    import subprocess
-    import os
-
     ld = os.environ.get("LD", "ld")
-
-    try:
-        cmd = "{} -v {} 2>/dev/null".format(ld, option)
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return "y" if proc.returncode == 0 else "n"
-    except Exception:
-        return "n"
+    return "y" if _run_cmd("{} -v {} 2>/dev/null".format(ld, option)) else "n"
 
 
 def _as_instr_fn(kconf, _, instr, extra_flags=""):
-    # Test if the assembler supports a specific instruction
-    # Returns 'y' if supported, 'n' otherwise
-    import subprocess
-    import os
-
     cc = os.environ.get("CC", "gcc")
-
-    try:
-        # Use printf to create the instruction, pipe to compiler as assembler
-        cmd = (
-            'printf "%b\\n" "{}" | '
-            "{} {} -Wa,--fatal-warnings -c -x assembler-with-cpp -o /dev/null - 2>/dev/null"
-        ).format(instr.replace('"', '\\"'), cc, extra_flags)
-
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return "y" if proc.returncode == 0 else "n"
-    except Exception:
-        return "n"
+    cmd = (
+        'printf "%b\\n" "{}" | '
+        "{} {} -Wa,--fatal-warnings -c -x assembler-with-cpp"
+        " -o /dev/null - 2>/dev/null"
+    ).format(instr.replace('"', '\\"'), cc, extra_flags)
+    return "y" if _run_cmd(cmd) else "n"
 
 
 def _as_option_fn(kconf, _, option, fallback=""):
-    # Test if the assembler (via CC) supports a given option
-    # Returns 'y' if supported, 'n' otherwise
-    import subprocess
-    import tempfile
-    import os
-
     cc = os.environ.get("CC", "gcc")
-
-    tmpdir = None
-    try:
-        tmpdir = tempfile.mkdtemp()
-        cmd = ("{} {} -c -x assembler /dev/null -o {}/tmp.o 2>/dev/null").format(
-            cc, option, tmpdir
+    return (
+        "y"
+        if _run_cmd_in_tmpdir(
+            cc
+            + " "
+            + option
+            + " -c -x assembler /dev/null -o {tmpdir}/tmp.o 2>/dev/null"
         )
-
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return "y" if proc.returncode == 0 else "n"
-    except Exception:
-        return "n"
-    finally:
-        if tmpdir:
-            try:
-                import shutil
-
-                shutil.rmtree(tmpdir)
-            except Exception:
-                pass
+        else "n"
+    )
 
 
 def _if_success_fn(kconf, _, command, then_val, else_val):
-    # Executes command and returns then_val if successful, else_val otherwise
-    # This is the most general form, used by success/failure
-    import subprocess
-
-    try:
-        proc = subprocess.Popen(
-            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return then_val if proc.returncode == 0 else else_val
-    except Exception:
-        return else_val
+    return then_val if _run_cmd(command) else else_val
 
 
 def _failure_fn(kconf, _, command):
-    # Returns 'n' if the shell command exits with 0, otherwise 'y'
-    # Inverse of success
-    import subprocess
-
-    try:
-        proc = subprocess.Popen(
-            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return "n" if proc.returncode == 0 else "y"
-    except Exception:
-        return "y"
+    return "n" if _run_cmd(command) else "y"
 
 
 def _cc_option_bit_fn(kconf, _, option):
-    # Test if the C compiler supports a specific bit flag
-    # Returns the option if supported, empty string otherwise
-    import subprocess
-    import os
-
     cc = os.environ.get("CC", "gcc")
-
-    try:
-        cmd = ("{} -Werror {} -E -x c /dev/null -o /dev/null 2>/dev/null").format(
-            cc, option
+    return (
+        option
+        if _run_cmd(
+            "{} -Werror {} -E -x c /dev/null -o /dev/null 2>/dev/null".format(
+                cc, option
+            )
         )
-
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return option if proc.returncode == 0 else ""
-    except Exception:
-        return ""
+        else ""
+    )
 
 
 def _rustc_option_fn(kconf, _, option):
-    # Test if the Rust compiler supports a given option
-    # Returns 'y' if supported, 'n' otherwise
-    import subprocess
     import tempfile
-    import os
 
     rustc = os.environ.get("RUSTC", "rustc")
 
@@ -7458,11 +7361,7 @@ def _rustc_option_fn(kconf, _, option):
             "{} {} --crate-type=rlib {} --out-dir={} -o {}/tmp.rlib 2>/dev/null"
         ).format(rustc, option, dummy_rs, tmpdir, tmpdir)
 
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc.communicate()
-        return "y" if proc.returncode == 0 else "n"
+        return "y" if _run_cmd(cmd) else "n"
     except Exception:
         return "n"
     finally:

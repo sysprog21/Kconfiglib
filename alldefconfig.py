@@ -14,6 +14,7 @@ Usage for the Linux kernel:
 
   $ make [ARCH=<arch>] scriptconfig SCRIPT=Kconfiglib/alldefconfig.py
 """
+
 import kconfiglib
 
 
