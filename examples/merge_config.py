@@ -75,7 +75,6 @@ import sys
 
 from kconfiglib import Kconfig, BOOL, TRISTATE, TRI_TO_STR
 
-
 if len(sys.argv) < 4:
     sys.exit("usage: merge_config.py Kconfig merged_config config1 [config2 ...]")
 

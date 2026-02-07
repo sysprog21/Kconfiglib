@@ -138,7 +138,6 @@ from kconfiglib import (
     TRI_TO_STR,
 )
 
-
 # Python 2/3 compatibility hack
 if sys.version_info[0] < 3:
     input = raw_input

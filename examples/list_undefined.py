@@ -41,7 +41,6 @@ import subprocess
 
 from kconfiglib import Kconfig
 
-
 # Referenced inside the Kconfig files
 os.environ["KERNELVERSION"] = str(
     subprocess.check_output(("make", "kernelversion")).decode("utf-8").rstrip()

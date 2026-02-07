@@ -16,7 +16,6 @@ import sys
 
 import kconfiglib
 
-
 kconf = kconfiglib.Kconfig(sys.argv[1])
 
 # Mirrors defconfig

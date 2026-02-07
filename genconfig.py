@@ -79,9 +79,7 @@ information isn't needed.
 Enable generation of symbol dependency information for incremental builds,
 optionally specifying the output directory (default: {}). See the docstring of
 Kconfig.sync_deps() in Kconfiglib for more information.
-""".format(
-            DEFAULT_SYNC_DEPS_PATH
-        ),
+""".format(DEFAULT_SYNC_DEPS_PATH),
     )
 
     parser.add_argument(

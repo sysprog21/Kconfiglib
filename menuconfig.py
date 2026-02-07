@@ -260,20 +260,12 @@ _MAIN_HELP_LINES = """
 [O] Load                    [?] Symbol info            [/] Jump to symbol
 [F] Toggle show-help mode   [C] Toggle show-name mode  [A] Toggle show-all mode
 [Q] Quit (prompts for save) [D] Save minimal config (advanced)
-"""[
-    1:-1
-].split(
-    "\n"
-)
+"""[1:-1].split("\n")
 
 # Lines of help text shown at the bottom of the information dialog
 _INFO_HELP_LINES = """
 [ESC/q] Return to menu      [/] Jump to symbol
-"""[
-    1:-1
-].split(
-    "\n"
-)
+"""[1:-1].split("\n")
 
 # Lines of help text shown at the bottom of the search dialog
 _JUMP_TO_HELP_LINES = """
@@ -282,11 +274,7 @@ module). The up/down cursor keys step in the list. [Enter] jumps to the
 selected symbol. [ESC] aborts the search. Type multiple space-separated
 strings/regexes to find entries that match all of them. Type Ctrl-F to
 view the help of the selected item without leaving the dialog.
-"""[
-    1:-1
-].split(
-    "\n"
-)
+"""[1:-1].split("\n")
 
 #
 # Styling
@@ -705,8 +693,7 @@ def _ensure_curses():
     except ImportError as e:
         if not _IS_WINDOWS:
             raise
-        sys.exit(
-            """\
+        sys.exit("""\
 menuconfig failed to import the standard Python 'curses' library. Try
 installing a package like windows-curses
 (https://github.com/zephyrproject-rtos/windows-curses) by running this command
@@ -719,10 +706,7 @@ installed when installing Kconfiglib via pip on Windows (because it breaks
 installation on MSYS2).
 
 Exception:
-{}: {}""".format(
-                type(e).__name__, e
-            )
-        )
+{}: {}""".format(type(e).__name__, e))
 
 
 def _main():

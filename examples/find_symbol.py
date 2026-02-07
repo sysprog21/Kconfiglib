@@ -78,7 +78,6 @@ import sys
 
 import kconfiglib
 
-
 if len(sys.argv) < 3:
     sys.exit('Pass symbol name (without "CONFIG_" prefix) with SCRIPT_ARG=<name>')
 
