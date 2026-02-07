@@ -120,17 +120,13 @@ def run(cmd, cwd=None, check=True):
     stdout = stdout.decode("utf-8", errors="ignore")
     stderr = stderr.decode("utf-8")
     if check and process.returncode:
-        err(
-            """\
+        err("""\
 '{}' exited with status {}.
 
 ===stdout===
 {}
 ===stderr===
-{}""".format(
-                cmd_s, process.returncode, stdout, stderr
-            )
-        )
+{}""".format(cmd_s, process.returncode, stdout, stderr))
 
     if stderr:
         warn("'{}' wrote to stderr:\n{}".format(cmd_s, stderr))

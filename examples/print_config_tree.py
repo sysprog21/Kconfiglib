@@ -67,7 +67,6 @@ from kconfiglib import (
     expr_value,
 )
 
-
 # Add help description to output
 WITH_HELP_DESC = False
 

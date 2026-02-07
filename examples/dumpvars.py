@@ -10,7 +10,6 @@ import sys
 
 import kconfiglib
 
-
 print(
     " ".join(
         "{}='{}'".format(var, os.environ[var])

@@ -1364,9 +1364,7 @@ tests/Krecursive2:1: recursive 'source' of 'tests/Krecursive1' detected. Check t
 Include path:
 tests/Krecursive1:1
 tests/Krecursive2:1
-"""[
-                    :-1
-                ],
+"""[:-1],
             )
         except:
             fail("recursive 'source' raised wrong exception")
@@ -2334,9 +2332,7 @@ tests/Krecursive2:1
 #define CONFIG_I 5
 #define CONFIG_N 6
 #define CONFIG_G 7
-"""[
-            1:
-        ],
+"""[1:],
     )
 
     # Differs from defaults
@@ -2356,9 +2352,7 @@ CONFIG_E=-1
 CONFIG_R2=-1
 CONFIG_N=-1
 CONFIG_G=-1
-"""[
-            1:
-        ],
+"""[1:],
     )
 
     # Test header strings in configuration files and headers
@@ -2880,9 +2874,7 @@ config J
 	depends on A
 
 ...depends again on A (defined at Kconfiglib/tests/Kdeploop10:1)
-"""[
-                :-1
-            ],
+"""[:-1],
         )
     except:
         fail("Loop detection message check raised wrong exception")
@@ -3185,9 +3177,7 @@ warning: undefined symbol UNDEF_3:
 menu "menu"
 	depends on UNDEF_1
 	visible if UNDEF_3
-"""[
-                1:-1
-            ],
+"""[1:-1],
         )
 
         os.environ.pop("KCONFIG_WARN_UNDEF")

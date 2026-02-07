@@ -62,7 +62,7 @@ jobs:
     - name: Check out Linux source code
       # Skip for Windows (headless-only mode)
       if: ${{ matrix.target.headless-only != true }}
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       # On Windows, checkout of 'aux.c' is expected to fail because ... Windows.
       continue-on-error: true
       with:
@@ -70,7 +70,7 @@ jobs:
         ref: v5.4
 
     - name: Check out Kconfiglib source code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         # Windows (headless-only): checkout to root directory
         # Linux/macOS (full test): checkout to Kconfiglib subdirectory
