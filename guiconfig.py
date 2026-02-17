@@ -99,6 +99,8 @@ from kconfiglib import (
     TYPE_TO_STR,
     standard_kconfig,
     standard_config_filename,
+    _needs_save as _kconf_needs_save,
+    _extract_controlling_symbols,
 )
 
 # If True, use GIF image data embedded in this file instead of separate GIF
@@ -462,28 +464,7 @@ def _load_config():
 
 
 def _needs_save():
-    # Returns True if a just-loaded .config file is outdated (would get
-    # modified when saving)
-
-    if _kconf.missing_syms:
-        # Assignments to undefined symbols in the .config
-        return True
-
-    for sym in _kconf.unique_defined_syms:
-        if sym.user_value is None:
-            if sym.config_string:
-                # Unwritten symbol
-                return True
-        elif sym.orig_type in (BOOL, TRISTATE):
-            if sym.tri_value != sym.user_value:
-                # Written bool/tristate symbol, new value
-                return True
-        elif sym.str_value != sym.user_value:
-            # Written string/int/hex symbol, new value
-            return True
-
-    # No need to prompt for save
-    return False
+    return _kconf_needs_save(_kconf)
 
 
 def _create_id_to_node():
@@ -1273,35 +1254,6 @@ def _get_force_info(sym):
         shown += ", +{}".format(len(sym_names) - 2)
 
     return " [{} {}]".format(prefix, shown)
-
-
-def _extract_controlling_symbols(expr_list):
-    # Extracts the primary controlling symbol from each expression string
-    # Returns a list of unique symbol names
-    #
-    # For "A && B", extracts "A" (the symbol doing the select/imply)
-    # For "A || B", extracts both "A" and "B"
-    # For simple "A", extracts "A"
-    #
-    # This avoids showing condition symbols as if they're doing the select/imply
-
-    sym_names = []
-    for expr in expr_list:
-        # Split on && first - we only want symbols before &&
-        # For "FOO && BAR", we want FOO (the selector), not BAR (the condition)
-        and_idx = expr.find(" && ")
-        primary = expr[:and_idx].strip() if and_idx != -1 else expr.strip()
-
-        # Now handle || - all parts are equal
-        if " || " in primary:
-            for part in primary.split(" || "):
-                part = part.strip()
-                if part and part not in sym_names:
-                    sym_names.append(part)
-        elif primary and primary not in sym_names:
-            sym_names.append(primary)
-
-    return sym_names
 
 
 def _node_str(node):
