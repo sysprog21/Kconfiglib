@@ -1456,7 +1456,7 @@ class Kconfig(object):
 
         Disables warnings for duplicated assignments within configuration files
         for the duration of the call
-        (kconf.warn_assign_override/warn_assign_redun = False), and restores
+        (warn_assign_override/warn_assign_redun = False), and restores
         the previous warning settings at the end. The KCONFIG_ALLCONFIG
         configuration file is expected to override symbols.
 
@@ -1468,7 +1468,47 @@ class Kconfig(object):
           Command-specific configuration filename - "allyes.config",
           "allno.config", etc.
         """
-        load_allconfig(self, filename)
+        allconfig = os.getenv("KCONFIG_ALLCONFIG")
+        if allconfig is None:
+            return
+
+        def std_msg(e):
+            # "Upcasts" a _KconfigIOError to an IOError, removing the custom
+            # __str__() message. The standard message is better here.
+            #
+            # This might also convert an OSError to an IOError in obscure
+            # cases, but it's probably not a big deal. The distinction is
+            # shaky (see PEP-3151).
+            return IOError(e.errno, e.strerror, e.filename)
+
+        old_warn_assign_override = self.warn_assign_override
+        old_warn_assign_redun = self.warn_assign_redun
+        self.warn_assign_override = self.warn_assign_redun = False
+
+        if allconfig in ("", "1"):
+            try:
+                print(self.load_config(filename, False))
+            except EnvironmentError as e1:
+                try:
+                    print(self.load_config("all.config", False))
+                except EnvironmentError as e2:
+                    sys.exit(
+                        "error: KCONFIG_ALLCONFIG is set, but neither {} "
+                        "nor all.config could be opened: {}, {}".format(
+                            filename, std_msg(e1), std_msg(e2)
+                        )
+                    )
+        else:
+            try:
+                print(self.load_config(allconfig, False))
+            except EnvironmentError as e:
+                sys.exit(
+                    "error: KCONFIG_ALLCONFIG is set to '{}', which "
+                    "could not be opened: {}".format(allconfig, std_msg(e))
+                )
+
+        self.warn_assign_override = old_warn_assign_override
+        self.warn_assign_redun = old_warn_assign_redun
 
     def write_autoconf(self, filename=None, header=None):
         r"""
@@ -2068,76 +2108,6 @@ class Kconfig(object):
                 choice.unset_value()
         finally:
             self._warn_assign_no_prompt = True
-
-    def enable_warnings(self):
-        """
-        Do 'Kconfig.warn = True' instead. Maintained for backwards
-        compatibility.
-        """
-        self.warn = True
-
-    def disable_warnings(self):
-        """
-        Do 'Kconfig.warn = False' instead. Maintained for backwards
-        compatibility.
-        """
-        self.warn = False
-
-    def enable_stderr_warnings(self):
-        """
-        Do 'Kconfig.warn_to_stderr = True' instead. Maintained for backwards
-        compatibility.
-        """
-        self.warn_to_stderr = True
-
-    def disable_stderr_warnings(self):
-        """
-        Do 'Kconfig.warn_to_stderr = False' instead. Maintained for backwards
-        compatibility.
-        """
-        self.warn_to_stderr = False
-
-    def enable_undef_warnings(self):
-        """
-        Do 'Kconfig.warn_assign_undef = True' instead. Maintained for backwards
-        compatibility.
-        """
-        self.warn_assign_undef = True
-
-    def disable_undef_warnings(self):
-        """
-        Do 'Kconfig.warn_assign_undef = False' instead. Maintained for
-        backwards compatibility.
-        """
-        self.warn_assign_undef = False
-
-    def enable_override_warnings(self):
-        """
-        Do 'Kconfig.warn_assign_override = True' instead. Maintained for
-        backwards compatibility.
-        """
-        self.warn_assign_override = True
-
-    def disable_override_warnings(self):
-        """
-        Do 'Kconfig.warn_assign_override = False' instead. Maintained for
-        backwards compatibility.
-        """
-        self.warn_assign_override = False
-
-    def enable_redun_warnings(self):
-        """
-        Do 'Kconfig.warn_assign_redun = True' instead. Maintained for backwards
-        compatibility.
-        """
-        self.warn_assign_redun = True
-
-    def disable_redun_warnings(self):
-        """
-        Do 'Kconfig.warn_assign_redun = False' instead. Maintained for
-        backwards compatibility.
-        """
-        self.warn_assign_redun = False
 
     def __repr__(self):
         """
@@ -6335,17 +6305,7 @@ class Variable(object):
 class KconfigError(Exception):
     """
     Exception raised for Kconfig-related errors.
-
-    KconfigError and KconfigSyntaxError are the same class. The
-    KconfigSyntaxError alias is only maintained for backwards compatibility.
     """
-
-
-KconfigSyntaxError = KconfigError  # Backwards compatibility
-
-
-class InternalError(Exception):
-    "Never raised. Kept around for backwards compatibility."
 
 
 # Workaround:
@@ -6686,55 +6646,6 @@ def _extract_controlling_symbols(expr_list):
             sym_names.append(primary)
 
     return sym_names
-
-
-def load_allconfig(kconf, filename):
-    """
-    Use Kconfig.load_allconfig() instead, which was added in Kconfiglib 13.4.0.
-    Supported for backwards compatibility. Might be removed at some point after
-    a long period of deprecation warnings.
-    """
-    allconfig = os.getenv("KCONFIG_ALLCONFIG")
-    if allconfig is None:
-        return
-
-    def std_msg(e):
-        # "Upcasts" a _KconfigIOError to an IOError, removing the custom
-        # __str__() message. The standard message is better here.
-        #
-        # This might also convert an OSError to an IOError in obscure cases,
-        # but it's probably not a big deal. The distinction is shaky (see
-        # PEP-3151).
-        return IOError(e.errno, e.strerror, e.filename)
-
-    old_warn_assign_override = kconf.warn_assign_override
-    old_warn_assign_redun = kconf.warn_assign_redun
-    kconf.warn_assign_override = kconf.warn_assign_redun = False
-
-    if allconfig in ("", "1"):
-        try:
-            print(kconf.load_config(filename, False))
-        except EnvironmentError as e1:
-            try:
-                print(kconf.load_config("all.config", False))
-            except EnvironmentError as e2:
-                sys.exit(
-                    "error: KCONFIG_ALLCONFIG is set, but neither {} "
-                    "nor all.config could be opened: {}, {}".format(
-                        filename, std_msg(e1), std_msg(e2)
-                    )
-                )
-    else:
-        try:
-            print(kconf.load_config(allconfig, False))
-        except EnvironmentError as e:
-            sys.exit(
-                "error: KCONFIG_ALLCONFIG is set to '{}', which "
-                "could not be opened: {}".format(allconfig, std_msg(e))
-            )
-
-    kconf.warn_assign_override = old_warn_assign_override
-    kconf.warn_assign_redun = old_warn_assign_redun
 
 
 #

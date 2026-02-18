@@ -1,0 +1,66 @@
+# For testing Symbol.rev_dep (select) and Symbol.weak_rev_dep (imply)
+
+config MODULES
+    def_bool y
+
+config PLAIN
+    bool "plain"
+
+# Single select
+config SEL_A
+    bool "sel_a"
+    select SINGLE_TARGET
+
+config SINGLE_TARGET
+    bool
+
+# Multiple selectors -> OR expression
+config SEL_B
+    bool "sel_b"
+    select MULTI_TARGET
+
+config SEL_C
+    bool "sel_c"
+    select MULTI_TARGET
+
+config MULTI_TARGET
+    bool
+
+# Conditional select -> AND expression
+config COND_DEP
+    bool "cond_dep"
+
+config COND_SEL
+    bool "cond_sel"
+    select COND_TARGET if COND_DEP
+
+config COND_TARGET
+    bool
+
+# Single imply
+config IMP_A
+    bool "imp_a"
+    imply IMP_SINGLE_TARGET
+
+config IMP_SINGLE_TARGET
+    bool
+
+# Multiple impliers -> OR expression
+config IMP_B
+    bool "imp_b"
+    imply IMP_MULTI_TARGET
+
+config IMP_C
+    bool "imp_c"
+    imply IMP_MULTI_TARGET
+
+config IMP_MULTI_TARGET
+    bool
+
+# Conditional imply
+config IMP_COND
+    bool "imp_cond"
+    imply IMP_COND_TARGET if COND_DEP
+
+config IMP_COND_TARGET
+    bool
