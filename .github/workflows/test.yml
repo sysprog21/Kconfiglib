@@ -18,9 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # NOTE: Full testsuite on Windows is disabled because the test script
-        #       requires Linux kernel source tree. However, headless mode tests
-        #       are now enabled for Windows.
+        # NOTE: Windows runs only headless + menuconfig import tests (no kernel
+        #       tree, no Unix shell). Linux/macOS run selftests, compatibility
+        #       tests, and example scripts.
         target:
         # Python 3.12
         - python: '3.12'
@@ -57,14 +57,12 @@ jobs:
 
     - name: Install Python dependencies
       run: |
-        pip install --user setuptools wheel
+        python -m pip install --user setuptools wheel pytest
 
     - name: Check out Linux source code
       # Skip for Windows (headless-only mode)
       if: ${{ matrix.target.headless-only != true }}
       uses: actions/checkout@v6
-      # On Windows, checkout of 'aux.c' is expected to fail because ... Windows.
-      continue-on-error: true
       with:
         repository: torvalds/linux
         ref: v5.4
@@ -76,17 +74,30 @@ jobs:
         # Linux/macOS (full test): checkout to Kconfiglib subdirectory
         path: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
 
+    - name: Run pytest selftests
+      # Skip on Windows: several tests depend on Unix shell ($(shell,...)),
+      # gcc, and forward-slash paths that are unavailable on Windows CI.
+      if: ${{ matrix.target.headless-only != true }}
+      working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
+      run: |
+        python -m pytest tests/ -v --tb=short --ignore=tests/test_compat.py
+
     - name: Apply Linux Kconfig Makefile patch
       # Skip for Windows (headless-only mode)
       if: ${{ matrix.target.headless-only != true }}
       run: |
         git apply Kconfiglib/makefile.patch
 
-    - name: Run testsuite
+    - name: Run compatibility tests and example scripts
       # Skip for Windows (headless-only mode)
       if: ${{ matrix.target.headless-only != true }}
       run: |
         Kconfiglib/tests/reltest python
+
+    - name: Install windows-curses (Windows only)
+      if: matrix.target.os == 'Windows'
+      run: |
+        python -m pip install windows-curses
 
     - name: Test headless mode
       # Use root dir for Windows, Kconfiglib subdir for Linux/macOS
@@ -100,11 +111,6 @@ jobs:
         menuconfig.menuconfig(kconf, headless=True)
         print('Headless mode test passed')
         EOF
-
-    - name: Install windows-curses (Windows only)
-      if: matrix.target.os == 'Windows'
-      run: |
-        pip install windows-curses
 
     - name: Test menuconfig import (Windows Python 3.12)
       if: matrix.target.os == 'Windows'

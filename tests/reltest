@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 
-# Runs the test suite and all examples scripts, bailing immediately if anything
-# fails. For the examples that aren't tested in the test suite, we just confirm
-# that they at least run.
+# Runs compatibility tests and example scripts from a kernel tree root,
+# bailing immediately if anything fails. For the examples that aren't
+# tested by the test suite, we just confirm that they at least run.
 #
 # Should be run from the kernel root with  $ Kconfiglib/tests/reltest
+#
+# Selftests (tests/test_*.py excluding test_compat.py) should be run
+# separately from the Kconfiglib project root:
+#   $ cd Kconfiglib && python -m pytest tests/ -v
 
 test_script() {
     echo -e "\n================= $1 with $py =================\n"
@@ -26,11 +30,15 @@ else
     py_execs=$@
 fi
 
-for py in $py_execs; do
-    echo -e "\n================= Test suite with $py =================\n"
+kconfiglib_dir="$(cd "$(dirname "$0")/.." && pwd)"
 
-    if ! $py Kconfiglib/testsuite.py; then
-        echo "test suite failed for $py"
+for py in $py_execs; do
+    echo -e "\n================= Compatibility tests with $py =================\n"
+
+    # Compat tests run from the kernel root (cwd) where they compare output
+    # against the C Kconfig tools.
+    if ! $py -m pytest "$kconfiglib_dir/tests/test_compat.py" -x -v --tb=short; then
+        echo "compatibility tests failed for $py"
         exit 1
     fi
 
