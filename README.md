@@ -86,9 +86,8 @@ Most changes thus far have addressed small issues introduced in the early days o
 ### Manual installation
 
 Just drop `kconfiglib.py` and the scripts you want somewhere.
-There are no third-party dependencies, but the terminal `menuconfig` will not work on Windows unless a package like
-[windows-curses](https://github.com/zephyrproject-rtos/windows-curses)
-is installed.
+There are no third-party dependencies.
+The terminal `menuconfig` uses a pure-Python terminal I/O module and works on all platforms without additional packages.
 
 ### Installation for the Linux kernel
 
@@ -345,7 +344,7 @@ This warning can also be toggled by setting `Kconfig.warn_assign_undef` to `True
 
 Three configuration interfaces are currently available:
 
-- [menuconfig.py](menuconfig.py) is a terminal-based configuration interface implemented using the standard Python `curses` module.
+- [menuconfig.py](menuconfig.py) is a terminal-based configuration interface using a pure-Python terminal I/O module.
   It includes `xconfig` features such as showing invisible symbols and symbol names,
   and it allows jumping directly to a symbol in the menu tree (even if it is currently invisible).
 
@@ -353,15 +352,7 @@ Three configuration interfaces are currently available:
 
   There is also a show-help mode that displays the help text of the currently selected symbol in the bottom help window.
 
-  `menuconfig.py` requires Python 3.6+.
-
-  There are no third-party dependencies on Unix-like systems.
-  On Windows, the `curses` module is not included by default, but can be added by installing the `windows-curses` package:
-  ```shell
-  pip install windows-curses
-  ```
-  These wheels are built from [this repository](https://github.com/zephyrproject-rtos/windows-curses),
-  which is based on Christoph Gohlke's [Python Extension Packages for Windows](https://www.cgohlke.com/#curses).
+  `menuconfig.py` requires Python 3.6+. No third-party dependencies or C extensions are needed on any platform.
 
   See the docstring at the top of [menuconfig.py](menuconfig.py) for more information about the terminal menuconfig implementation.
 

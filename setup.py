@@ -21,6 +21,7 @@ setuptools.setup(
     license="ISC",
     py_modules=(
         "kconfiglib",
+        "rawterm",
         "menuconfig",
         "guiconfig",
         "genconfig",
@@ -52,8 +53,8 @@ setuptools.setup(
             "setconfig = setconfig:main",
         )
     },
-    # Note: windows-curses is not automatically installed on Windows anymore,
-    # because it made Kconfiglib impossible to install on MSYS2 with pip
+    # No C extensions or third-party dependencies required.
+    # menuconfig uses pure-Python terminal I/O instead of curses.
     python_requires=">=3.6",
     project_urls={
         "GitHub repository": "https://github.com/sysprog21/Kconfiglib",

@@ -18,9 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # NOTE: Windows runs only headless + menuconfig import tests (no kernel
-        #       tree, no Unix shell). Linux/macOS run selftests, compatibility
-        #       tests, and example scripts.
+        # NOTE: Windows runs only headless tests (no kernel tree, no Unix
+        #       shell). Linux/macOS run selftests, compatibility tests, and
+        #       example scripts.
         target:
         # Python 3.12
         - python: '3.12'
@@ -94,27 +94,18 @@ jobs:
       run: |
         Kconfiglib/tests/reltest python
 
-    - name: Install windows-curses (Windows only)
-      if: matrix.target.os == 'Windows'
+    - name: Validate rawterm and menuconfig (Unix)
+      # Exercises rawterm Color/Style/Region compositing, terminal init/close
+      # (termios on Unix), and menuconfig headless mode with style parsing.
+      if: ${{ matrix.target.os != 'Windows' }}
+      working-directory: Kconfiglib
       run: |
-        python -m pip install windows-curses
+        python .ci/validate-rawterm.py
 
-    - name: Test headless mode
-      # Use root dir for Windows, Kconfiglib subdir for Linux/macOS
-      working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
+    - name: Validate rawterm and menuconfig (Windows)
+      # On Windows, use cmd so Python gets real console handles (bash
+      # runs through MSYS2/mintty which lacks a native Windows console).
+      if: ${{ matrix.target.os == 'Windows' }}
+      shell: cmd
       run: |
-        python << 'EOF'
-        from kconfiglib import Kconfig
-        import menuconfig
-        print('Testing headless mode...')
-        kconf = Kconfig('examples/Kmenuconfig')
-        menuconfig.menuconfig(kconf, headless=True)
-        print('Headless mode test passed')
-        EOF
-
-    - name: Test menuconfig import (Windows Python 3.12)
-      if: matrix.target.os == 'Windows'
-      # Use root dir for Windows (headless-only mode)
-      working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
-      run: |
-        python -c "import menuconfig; print('menuconfig import successful')"
+        python .ci/validate-rawterm.py
