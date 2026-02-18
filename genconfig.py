@@ -35,7 +35,6 @@ headers. Remember to export the variable to the environment.
 
 import argparse
 import os
-import sys
 
 import kconfiglib
 
@@ -146,11 +145,6 @@ only supported for backwards compatibility).
 
 
 def _open_write(path):
-    # Python 2/3 compatibility. io.open() is available on both, but makes
-    # write() expect 'unicode' strings on Python 2.
-
-    if sys.version_info[0] < 3:
-        return open(path, "w")
     return open(path, "w", encoding="utf-8")
 
 

@@ -7,7 +7,7 @@
 Overview
 ========
 
-A curses-based Python 2/3 menuconfig implementation. The interface should feel
+A curses-based menuconfig implementation. The interface should feel
 familiar to people used to mconf ('make menuconfig').
 
 Supports the same keys as mconf, and also supports a set of keybindings
@@ -181,8 +181,6 @@ Doesn't work out of the box on Windows, but can be made to work with
 
 See the https://github.com/zephyrproject-rtos/windows-curses repository.
 """
-
-from __future__ import print_function
 
 import os
 import sys
@@ -1098,12 +1096,9 @@ def _init():
     # Looking for this in addition to KEY_BACKSPACE (which is unreliable) makes
     # backspace work with TERM=vt100. That makes it likely to work in sane
     # environments.
-    _ERASE_CHAR = curses.erasechar()
-    if sys.version_info[0] >= 3:
-        # erasechar() returns a one-byte bytes object on Python 3. This sets
-        # _ERASE_CHAR to a blank string if it can't be decoded, which should be
-        # harmless.
-        _ERASE_CHAR = _ERASE_CHAR.decode("utf-8", "ignore")
+    # erasechar() returns a one-byte bytes object. This sets _ERASE_CHAR to a
+    # blank string if it can't be decoded, which should be harmless.
+    _ERASE_CHAR = curses.erasechar().decode("utf-8", "ignore")
 
     _init_styles()
 
@@ -3495,8 +3490,7 @@ def _menu_path_info(node):
 
 
 def _indent(s, n):
-    # Returns 's' with each line indented 'n' spaces. textwrap.indent() is not
-    # available in Python 2 (it's 3.3+).
+    # Returns 's' with each line indented 'n' spaces.
 
     return "\n".join(n * " " + line for line in s.split("\n"))
 

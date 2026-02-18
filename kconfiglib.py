@@ -5,7 +5,7 @@
 Overview
 ========
 
-Kconfiglib is a Python 2/3 library for scripting and extracting information
+Kconfiglib is a Python 3 library for scripting and extracting information
 from Kconfig (https://www.kernel.org/doc/Documentation/kbuild/kconfig-language.txt)
 configuration systems.
 
@@ -53,15 +53,14 @@ make kmenuconfig
 ----------------
 
 This target runs the curses menuconfig interface with Python 3. As of
-Kconfiglib 12.2.0, both Python 2 and Python 3 are supported (previously, only
-Python 3 was supported, so this was a backport).
+Kconfiglib 12.2.0, Python 3 (3.6+) is required.
 
 
 make guiconfig
 --------------
 
-This target runs the Tkinter menuconfig interface. Both Python 2 and Python 3
-are supported. To change the Python interpreter used, pass
+This target runs the Tkinter menuconfig interface. To change the Python
+interpreter used, pass
 PYTHONCMD=<executable> to 'make'. The default is 'python'.
 
 
@@ -886,13 +885,8 @@ class Kconfig(object):
         default warning settings (KCONFIG_WARN_UNDEF and
         KCONFIG_WARN_UNDEF_ASSIGN).
 
-        Raises KconfigError on syntax/semantic errors, and OSError or (possibly
-        a subclass of) IOError on IO errors ('errno', 'strerror', and
-        'filename' are available). Note that IOError is an alias for OSError on
-        Python 3, so it's enough to catch OSError there. If you need Python 2/3
-        compatibility, it's easiest to catch EnvironmentError, which is a
-        common base class of OSError/IOError on Python 2 and an alias for
-        OSError on Python 3.
+        Raises KconfigError on syntax/semantic errors, and OSError on IO errors
+        ('errno', 'strerror', and 'filename' are available).
 
         filename (default: "Kconfig"):
           The Kconfig file to load. For the Linux kernel, you'll want "Kconfig"
@@ -934,11 +928,6 @@ class Kconfig(object):
 
           The "utf-8" default avoids exceptions on systems that are configured
           to use the C locale, which implies an ASCII encoding.
-
-          This parameter has no effect on Python 2, due to implementation
-          issues (regular strings turning into Unicode strings, which are
-          distinct in Python 2). Python 2 doesn't decode regular strings
-          anyway.
 
           Related PEP: https://www.python.org/dev/peps/pep-0538/
 
@@ -4134,44 +4123,9 @@ class Kconfig(object):
         self._parse_error("extra tokens at end of line")
 
     def _open(self, filename, mode):
-        # open() wrapper:
-        #
-        # - Enable universal newlines mode on Python 2 to ease
-        #   interoperability between Linux and Windows. It's already the
-        #   default on Python 3.
-        #
-        #   The "U" flag would currently work for both Python 2 and 3, but it's
-        #   deprecated on Python 3, so play it future-safe.
-        #
-        #   io.open() defaults to universal newlines on Python 2 (and is an
-        #   alias for open() on Python 3), but it returns 'unicode' strings and
-        #   slows things down:
-        #
-        #     Parsing x86 Kconfigs on Python 2
-        #
-        #     with open(..., "rU"):
-        #
-        #       real  0m0.930s
-        #       user  0m0.905s
-        #       sys   0m0.025s
-        #
-        #     with io.open():
-        #
-        #       real  0m1.069s
-        #       user  0m1.040s
-        #       sys   0m0.029s
-        #
-        #   There's no appreciable performance difference between "r" and
-        #   "rU" for parsing performance on Python 2.
-        #
-        # - For Python 3, force the encoding. Forcing the encoding on Python 2
-        #   turns strings into Unicode strings, which gets messy. Python 2
-        #   doesn't decode regular strings anyway.
-        return (
-            open(filename, "rU" if mode == "r" else mode)
-            if _IS_PY2
-            else open(filename, mode, encoding=self._encoding)
-        )
+        # open() wrapper that forces the encoding for consistent behavior
+        # across locales (e.g. C locale implies ASCII).
+        return open(filename, mode, encoding=self._encoding)
 
     def _check_undef_syms(self):
         # Prints warnings for all references to undefined symbols within the
@@ -4212,7 +4166,7 @@ class Kconfig(object):
                     sym_to_nodes[ref_sym] = []
                 sym_to_nodes[ref_sym].append(node)
 
-        for sym in (self.syms.viewvalues if _IS_PY2 else self.syms.values)():
+        for sym in self.syms.values():
             # - sym.nodes empty means the symbol is undefined (has no
             #   definition locations)
             #
@@ -7298,12 +7252,11 @@ def _shell_fn(kconf, _, command):
         command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     ).communicate()
 
-    if not _IS_PY2:
-        try:
-            stdout = stdout.decode(kconf._encoding)
-            stderr = stderr.decode(kconf._encoding)
-        except UnicodeDecodeError as e:
-            _decoding_error(e, kconf.filename, kconf.linenr)
+    try:
+        stdout = stdout.decode(kconf._encoding)
+        stderr = stderr.decode(kconf._encoding)
+    except UnicodeDecodeError as e:
+        _decoding_error(e, kconf.filename, kconf.linenr)
 
     if stderr:
         kconf._warn(
@@ -7476,8 +7429,6 @@ STR_TO_TRI = {
 # Symbol will do. We test this with 'is'.
 _NO_CACHED_SELECTION = 0
 
-# Are we running on Python 2?
-_IS_PY2 = sys.version_info[0] < 3
 
 try:
     _UNAME_RELEASE = os.uname()[2]
@@ -7793,16 +7744,14 @@ KIND_TO_STR = {
 
 # Helper functions for getting compiled regular expressions, with the needed
 # matching function returned directly as a small optimization.
-#
-# Use ASCII regex matching on Python 3. It's already the default on Python 2.
 
 
 def _re_match(regex):
-    return re.compile(regex, 0 if _IS_PY2 else re.ASCII).match
+    return re.compile(regex, re.ASCII).match
 
 
 def _re_search(regex):
-    return re.compile(regex, 0 if _IS_PY2 else re.ASCII).search
+    return re.compile(regex, re.ASCII).search
 
 
 # Various regular expressions used during parsing

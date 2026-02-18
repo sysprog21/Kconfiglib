@@ -12,8 +12,6 @@ The default configuration filename is '.config'. A different filename can be
 passed in the KCONFIG_CONFIG environment variable.
 """
 
-from __future__ import print_function
-
 import argparse
 import sys
 
@@ -67,8 +65,7 @@ def main():
             if args.show_help:
                 for node in sym.nodes:
                     if node.help is not None:
-                        # Indent by two spaces. textwrap.indent() is not
-                        # available in Python 2 (it's 3.3+).
+                        # Indent by two spaces.
                         print("\n".join("  " + line for line in node.help.split("\n")))
                         break
 

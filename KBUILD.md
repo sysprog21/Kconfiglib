@@ -107,7 +107,7 @@ Functions are implemented in `kconfiglib.py` following these principles:
 
 - Uniform interface through the `_functions` dictionary
 - No special-case handling
-- Python 2.7+ and 3.2+ compatibility using standard library only
+- Python 3.6+ using standard library only
 - Graceful error handling (missing tools return `n`)
 
 ### Environment Variables
