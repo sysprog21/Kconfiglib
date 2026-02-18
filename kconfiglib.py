@@ -52,7 +52,7 @@ sections.
 make kmenuconfig
 ----------------
 
-This target runs the curses menuconfig interface with Python 3. As of
+This target runs the terminal menuconfig interface with Python 3. As of
 Kconfiglib 12.2.0, Python 3 (3.6+) is required.
 
 

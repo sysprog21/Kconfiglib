@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2018-2019 Nordic Semiconductor ASA and Ulf Magnusson
+# Copyright (c) 2018-2020 Nordic Semiconductor ASA and Ulf Magnusson
+# Copyright (c) 2024-2026 Kconfiglib contributors
 # SPDX-License-Identifier: ISC
 
 """
 Overview
 ========
 
-A curses-based menuconfig implementation. The interface should feel
-familiar to people used to mconf ('make menuconfig').
+A terminal-based menuconfig implementation using rawterm (pure-Python terminal
+I/O). The interface should feel familiar to people used to mconf
+('make menuconfig').
 
 Supports the same keys as mconf, and also supports a set of keybindings
 inspired by Vi:
 
-  J/K     : Down/Up
-  L       : Enter menu/Toggle item
-  H       : Leave menu
-  Ctrl-D/U: Page Down/Page Up
-  G/End   : Jump to end of list
-  g/Home  : Jump to beginning of list
+  J/K      : Down/Up
+  L        : Enter menu/Toggle item
+  H        : Leave menu
+  Ctrl-D/U : Page Down/Page Up
+  G/End    : Jump to end of list
+  g/Home   : Jump to beginning of list
 
-[Space] toggles values if possible, and enters menus otherwise. [Enter] works
-the other way around.
+The bottom of the dialog shows five buttons: Select, Exit, Help, Save, Load.
+[Tab]/[Left]/[Right] cycle between buttons. [Enter] activates the focused
+button. [Space] toggles values if possible, and enters menus otherwise.
 
 The mconf feature where pressing a key jumps to a menu entry with that
 character in it in the current menu isn't supported. A jump-to feature for
@@ -76,6 +79,7 @@ This is the current list of built-in styles:
 It is possible to customize the current style by changing colors of UI
 elements on the screen. This is the list of elements that can be stylized:
 
+    - screen        Full-screen background behind the dialog
     - path          Top row in the main display, with the menu path
     - separator     Separator lines between windows. Also used for the top line
                     in the symbol information display.
@@ -87,11 +91,15 @@ elements on the screen. This is the list of elements that can be stylized:
     - help          Help text windows at the bottom of various fullscreen
                     dialogs
     - show-help     Window showing the help text in show-help mode
-    - frame         Frame around dialog boxes
-    - body          Body of dialog boxes
+    - frame         Frame around pop-up dialog boxes
+    - body          Body of the main dialog
     - edit          Edit box in pop-up dialogs
     - jump-edit     Edit box in jump-to dialog
     - text          Symbol information text
+    - title         Dialog title text
+    - border        Border of the main dialog box
+    - menubox       Inner menu box border (left/top edges)
+    - menubox-border Inner menu box border (right/bottom edges and fill)
 
 The color definition is a comma separated list of attributes:
 
@@ -101,16 +109,14 @@ The color definition is a comma separated list of attributes:
                     brightred). On terminals that support more than 8 colors,
                     you can also directly put in a color number, e.g. fg:123
                     (hexadecimal and octal constants are accepted as well).
-                    Colors outside the range -1..curses.COLORS-1 (which is
-                    terminal-dependent) are ignored (with a warning). The COLOR
-                    can be also specified using a RGB value in the HTML
-                    notation, for example #RRGGBB. If the terminal supports
-                    color changing, the color is rendered accurately.
-                    Otherwise, the visually nearest color is used.
+                    Colors outside the range -1..255 are ignored (with a
+                    warning). The COLOR can be also specified using a RGB
+                    value in the HTML notation, for example #RRGGBB. The
+                    color is rendered using the closest available
+                    representation for the terminal.
 
                     If the background or foreground color of an element is not
-                    specified, it defaults to -1, representing the default
-                    terminal foreground or background color.
+                    specified, it defaults to the terminal default color.
 
                     Note: On some terminals a bright version of the color
                     implies bold.
@@ -142,8 +148,7 @@ settings have the same effect:
     MENUCONFIG_STYLE="linux selection=fg:white,bg:red"
 
 If the terminal doesn't support colors, the 'monochrome' theme is used, and
-MENUCONFIG_STYLE is ignored. The assumption is that the environment is broken
-somehow, and that the important thing is to get something usable.
+MENUCONFIG_STYLE is ignored.
 
 
 Other features
@@ -151,8 +156,8 @@ Other features
 
   - Seamless terminal resizing
 
-  - No dependencies on *nix, as the 'curses' module is in the Python standard
-    library
+  - No curses dependency -- uses rawterm, a pure-Python terminal I/O module.
+    Works on Unix and Windows 10+ without any pip install.
 
   - Unicode text entry
 
@@ -170,16 +175,6 @@ Other features
       * The include path is shown, listing the locations of the 'source'
         statements that included the Kconfig file of the symbol (or other
         item)
-
-
-Limitations
-===========
-
-Doesn't work out of the box on Windows, but can be made to work with
-
-    pip install windows-curses
-
-See the https://github.com/zephyrproject-rtos/windows-curses repository.
 """
 
 import os
@@ -187,14 +182,13 @@ import sys
 
 _IS_WINDOWS = os.name == "nt"  # Are we running on Windows?
 
-# Defer curses import to runtime - it will be imported by _ensure_curses()
-# when menuconfig() is called. This avoids import errors in headless CI/CD
-# environments where menuconfig UI is not used.
-
 import errno
 import locale
 import re
 import textwrap
+
+import rawterm
+from rawterm import Key, Box, Style, Color, NAMED_COLORS
 
 from kconfiglib import (
     Symbol,
@@ -226,8 +220,8 @@ from kconfiglib import (
 #
 
 # If True, try to change LC_CTYPE to a UTF-8 locale if it is set to the C
-# locale (which implies ASCII). This fixes curses Unicode I/O issues on systems
-# with bad defaults. ncurses configures itself from the locale settings.
+# locale (which implies ASCII). This fixes Unicode I/O issues on systems with
+# bad defaults.
 #
 # Related PEP: https://www.python.org/dev/peps/pep-0538/
 _CHANGE_C_LC_CTYPE_TO_UTF8 = True
@@ -254,13 +248,20 @@ _INPUT_DIALOG_MIN_WIDTH = 30
 # Number of arrows pointing up/down to draw when a window is scrolled
 _N_SCROLL_ARROWS = 14
 
-# Lines of help text shown at the bottom of the "main" display
-_MAIN_HELP_LINES = """
-[Space/Enter] Toggle/enter  [ESC] Leave menu           [S] Save
-[O] Load                    [?] Symbol info            [/] Jump to symbol
-[F] Toggle show-help mode   [C] Toggle show-name mode  [A] Toggle show-all mode
-[Q] Quit (prompts for save) [D] Save minimal config (advanced)
-"""[1:-1].split("\n")
+# Instruction text shown inside the mconf-style dialog, above the menu box.
+# Matches the menu_instructions[] string in mconf/mconf.c.
+_MENU_INSTRUCTIONS = (
+    "Arrow keys navigate the menu.  "
+    "<Enter> selects submenus ---> (or empty submenus ----).  "
+    "Highlighted letters are hotkeys.  "
+    "Pressing <Y> includes, <N> excludes, <M> modularizes features.  "
+    "Press <Esc><Esc> to exit, <?> for Help, </> for Search.  "
+    "Legend: [*] built-in  [ ] excluded  <M> module  < > module capable"
+)
+
+# Button labels for the main menu (matching mconf/lxdialog/menubox.c
+# print_buttons()).  Spaces in labels provide visual padding.
+_MENU_BUTTONS = ["Select", " Exit ", " Help ", " Save ", " Load "]
 
 # Lines of help text shown at the bottom of the information dialog
 _INFO_HELP_LINES = """
@@ -284,6 +285,7 @@ _STYLES = {
     # Style matching the Linux kernel's menuconfig (mconf/lxdialog)
     # Precisely matches lxdialog's set_bluetitle_theme() and set_classic_theme()
     "linux": """
+    screen=fg:cyan,bg:blue,bold
     path=fg:white,bg:blue,bold
     separator=fg:white,bg:blue
     list=fg:black,bg:white
@@ -297,18 +299,23 @@ _STYLES = {
     edit=fg:black,bg:white
     jump-edit=fg:black,bg:white
     text=fg:black,bg:white
+    title=fg:blue,bg:white,bold
+    border=fg:white,bg:white,bold
+    menubox=fg:black,bg:white
+    menubox-border=fg:white,bg:white,bold
     shadow=fg:black,bg:black,bold
-    button-active=fg:black,bg:white
-    button-inactive=fg:white,bg:blue,bold
-    button-key-active=fg:red,bg:white
-    button-key-inactive=fg:white,bg:blue,bold
-    button-label-active=fg:black,bg:white,bold
-    button-label-inactive=fg:yellow,bg:blue,bold
+    button-active=fg:white,bg:blue,bold
+    button-inactive=fg:black,bg:white
+    button-key-active=fg:yellow,bg:blue,bold
+    button-key-inactive=fg:red,bg:white
+    button-label-active=fg:white,bg:blue,bold
+    button-label-inactive=fg:black,bg:white,bold
     dialog=fg:black,bg:white
     dialog-frame=fg:white,bg:blue,bold
     """,
     # This style is forced on terminals that do not support colors
     "monochrome": """
+    screen=bold
     path=bold
     separator=bold,standout
     list=
@@ -322,199 +329,62 @@ _STYLES = {
     edit=standout
     jump-edit=
     text=
+    title=bold
+    border=bold
+    menubox=
+    menubox-border=bold
     """,
 }
 
-# Curses module - will be imported by _ensure_curses()
-curses = None
 
-# Named colors cache - will be initialized by _get_named_colors()
-_named_colors_cache = None
-
-
-def _get_named_colors():
-    """Returns the named colors dictionary. Initializes it on first call."""
-    global _named_colors_cache
-    if _named_colors_cache is None:
-        _named_colors_cache = {
-            # Basic colors
-            "black": curses.COLOR_BLACK,
-            "red": curses.COLOR_RED,
-            "green": curses.COLOR_GREEN,
-            "yellow": curses.COLOR_YELLOW,
-            "blue": curses.COLOR_BLUE,
-            "magenta": curses.COLOR_MAGENTA,
-            "cyan": curses.COLOR_CYAN,
-            "white": curses.COLOR_WHITE,
-            # Bright versions
-            "brightblack": curses.COLOR_BLACK + 8,
-            "brightred": curses.COLOR_RED + 8,
-            "brightgreen": curses.COLOR_GREEN + 8,
-            "brightyellow": curses.COLOR_YELLOW + 8,
-            "brightblue": curses.COLOR_BLUE + 8,
-            "brightmagenta": curses.COLOR_MAGENTA + 8,
-            "brightcyan": curses.COLOR_CYAN + 8,
-            "brightwhite": curses.COLOR_WHITE + 8,
-            # Aliases
-            "purple": curses.COLOR_MAGENTA,
-            "brightpurple": curses.COLOR_MAGENTA + 8,
-        }
-    return _named_colors_cache
-
-
-def _rgb_to_6cube(rgb):
-    # Converts an 888 RGB color to a 3-tuple (nice in that it's hashable)
-    # representing the closest xterm 256-color 6x6x6 color cube color.
-    #
-    # The xterm 256-color extension uses a RGB color palette with components in
-    # the range 0-5 (a 6x6x6 cube). The catch is that the mapping is nonlinear.
-    # Index 0 in the 6x6x6 cube is mapped to 0, index 1 to 95, then 135, 175,
-    # etc., in increments of 40. See the links below:
-    #
-    #   https://commons.wikimedia.org/wiki/File:Xterm_256color_chart.svg
-    #   https://github.com/tmux/tmux/blob/master/colour.c
-
-    # 48 is the middle ground between 0 and 95.
-    return tuple(0 if x < 48 else int(round(max(1, (x - 55) / 40))) for x in rgb)
-
-
-def _6cube_to_rgb(r6g6b6):
-    # Returns the 888 RGB color for a 666 xterm color cube index
-
-    return tuple(0 if x == 0 else 40 * x + 55 for x in r6g6b6)
-
-
-def _rgb_to_gray(rgb):
-    # Converts an 888 RGB color to the index of an xterm 256-color grayscale
-    # color with approx. the same perceived brightness
-
-    # Calculate the luminance (gray intensity) of the color. See
-    #   https://stackoverflow.com/questions/596216/formula-to-determine-brightness-of-rgb-color
-    # and
-    #   https://www.w3.org/TR/AERT/#color-contrast
-    luma = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
-
-    # Closest index in the grayscale palette, which starts at RGB 0x080808,
-    # with stepping 0x0A0A0A
-    index = int(round((luma - 8) / 10))
-
-    # Clamp the index to 0-23, corresponding to 232-255
-    return max(0, min(index, 23))
-
-
-def _gray_to_rgb(index):
-    # Convert a grayscale index to its closet single RGB component
-
-    return 3 * (10 * index + 8,)  # Returns a 3-tuple
-
-
-# Obscure Python: We never pass a value for rgb2index, and it keeps pointing to
-# the same dict. This avoids a global.
-def _alloc_rgb(rgb, rgb2index={}):
-    # Initialize a new entry in the xterm palette to the given RGB color,
-    # returning its index. If the color has already been initialized, the index
-    # of the existing entry is returned.
-    #
-    # ncurses is palette-based, so we need to overwrite palette entries to make
-    # new colors.
-    #
-    # The colors from 0 to 15 are user-defined, and there's no way to query
-    # their RGB values, so we better leave them untouched. Also leave any
-    # hypothetical colors above 255 untouched (though we're unlikely to
-    # allocate that many colors anyway).
-
-    if rgb in rgb2index:
-        return rgb2index[rgb]
-
-    # Many terminals allow the user to customize the first 16 colors. Avoid
-    # changing their values.
-    color_index = 16 + len(rgb2index)
-    if color_index >= 256:
-        _warn(
-            "Unable to allocate new RGB color ", rgb, ". Too many colors " "allocated."
+def _parse_color(color_def):
+    """Parse a color definition string, returning a rawterm.Color."""
+    # HTML format, #RRGGBB
+    if re.match("^#[A-Fa-f0-9]{6}$", color_def):
+        return Color.rgb(
+            int(color_def[1:3], 16),
+            int(color_def[3:5], 16),
+            int(color_def[5:7], 16),
         )
-        return 0
 
-    # Map each RGB component from the range 0-255 to the range 0-1000, which is
-    # what curses uses
-    curses.init_color(color_index, *(int(round(1000 * x / 255)) for x in rgb))
-    rgb2index[rgb] = color_index
+    if color_def in NAMED_COLORS:
+        return NAMED_COLORS[color_def]
 
-    return color_index
-
-
-def _color_from_num(num):
-    # Returns the index of a color that looks like color 'num' in the xterm
-    # 256-color palette (but that might not be 'num', if we're redefining
-    # colors)
-
-    # - _alloc_rgb() won't touch the first 16 colors or any (hypothetical)
-    #   colors above 255, so we can always return them as-is
-    #
-    # - If the terminal doesn't support changing color definitions, or if
-    #   curses.COLORS < 256, _alloc_rgb() won't touch any color, and all colors
-    #   can be returned as-is
-    if num < 16 or num > 255 or not curses.can_change_color() or curses.COLORS < 256:
-        return num
-
-    # _alloc_rgb() might redefine colors, so emulate the xterm 256-color
-    # palette by allocating new colors instead of returning color numbers
-    # directly
-
-    if num < 232:
-        num -= 16
-        return _alloc_rgb(_6cube_to_rgb(((num // 36) % 6, (num // 6) % 6, num % 6)))
-
-    return _alloc_rgb(_gray_to_rgb(num - 232))
+    try:
+        num = int(color_def, 0)
+        if 0 <= num <= 255:
+            return Color.index(num)
+        _warn("Ignoring color {} outside range 0..255".format(color_def))
+        return Color.DEFAULT
+    except ValueError:
+        _warn("Ignoring color", color_def, "that's neither predefined nor a number")
+        return Color.DEFAULT
 
 
-def _color_from_rgb(rgb):
-    # Returns the index of a color matching the 888 RGB color 'rgb'. The
-    # returned color might be an ~exact match or an approximation, depending on
-    # terminal capabilities.
+def _style_from_def(style_def):
+    """Parse a style definition string, returning a rawterm.Style."""
+    fg = Color.DEFAULT
+    bg = Color.DEFAULT
+    bold = False
+    standout = False
+    underline = False
 
-    # Calculates the Euclidean distance between two RGB colors
-    def dist(r1, r2):
-        return sum((x - y) ** 2 for x, y in zip(r1, r2))
+    if style_def:
+        for field in style_def.split(","):
+            if field.startswith("fg:"):
+                fg = _parse_color(field.split(":", 1)[1])
+            elif field.startswith("bg:"):
+                bg = _parse_color(field.split(":", 1)[1])
+            elif field == "bold":
+                bold = not _IS_WINDOWS
+            elif field == "standout":
+                standout = True
+            elif field == "underline":
+                underline = True
+            else:
+                _warn("Ignoring unknown style attribute", field)
 
-    if curses.COLORS >= 256:
-        # Assume we're dealing with xterm's 256-color extension
-
-        if curses.can_change_color():
-            # Best case -- the terminal supports changing palette entries via
-            # curses.init_color(). Initialize an unused palette entry and
-            # return it.
-            return _alloc_rgb(rgb)
-
-        # Second best case -- pick between the xterm 256-color extension colors
-
-        # Closest 6-cube "color" color
-        c6 = _rgb_to_6cube(rgb)
-        # Closest gray color
-        gray = _rgb_to_gray(rgb)
-
-        if dist(rgb, _6cube_to_rgb(c6)) < dist(rgb, _gray_to_rgb(gray)):
-            # Use the "color" color from the 6x6x6 color palette. Calculate the
-            # color number from the 6-cube index triplet.
-            return 16 + 36 * c6[0] + 6 * c6[1] + c6[2]
-
-        # Use the color from the gray palette
-        return 232 + gray
-
-    # Terminal not in xterm 256-color mode. This is probably the best we can
-    # do, or is it? Submit patches. :)
-    min_dist = float("inf")
-    best = -1
-    for color in range(curses.COLORS):
-        # ncurses uses the range 0..1000. Scale that down to 0..255.
-        d = dist(
-            rgb, tuple(int(round(255 * c / 1000)) for c in curses.color_content(color))
-        )
-        if d < min_dist:
-            min_dist = d
-            best = color
-
-    return best
+    return Style(fg=fg, bg=bg, bold=bold, standout=standout, underline=underline)
 
 
 def _parse_style(style_str, parsing_default):
@@ -527,13 +397,9 @@ def _parse_style(style_str, parsing_default):
     # 'default'/'monochrome' style, to prevent warnings.
 
     for sline in style_str.split():
-        # Words without a "=" character represents a style template
         if "=" in sline:
             key, data = sline.split("=", 1)
 
-            # The 'default' style template is assumed to define all keys. We
-            # run _style_to_curses() for non-existing keys as well, so that we
-            # print warnings for errors to the right of '=' for those too.
             if key not in _style and not parsing_default:
                 _warn("Ignoring non-existent style", key)
 
@@ -541,172 +407,30 @@ def _parse_style(style_str, parsing_default):
             if data in _style:
                 _style[key] = _style[data]
             else:
-                _style[key] = _style_to_curses(data)
+                _style[key] = _style_from_def(data)
 
         elif sline in _STYLES:
-            # Recursively parse style template. Ignore styles that don't exist,
-            # for backwards/forwards compatibility.
             _parse_style(_STYLES[sline], parsing_default)
 
         else:
             _warn("Ignoring non-existent style template", sline)
 
 
-# Dictionary mapping element types to the curses attributes used to display
-# them
+# Dictionary mapping element names to rawterm.Style objects
 _style = {}
 
 
-def _style_to_curses(style_def):
-    # Parses a style definition string (<element>=<style>), returning
-    # a (fg_color, bg_color, attributes) tuple.
-
-    def parse_color(color_def):
-        color_def = color_def.split(":", 1)[1]
-
-        # HTML format, #RRGGBB
-        if re.match("^#[A-Fa-f0-9]{6}$", color_def):
-            return _color_from_rgb(
-                (
-                    int(color_def[1:3], 16),
-                    int(color_def[3:5], 16),
-                    int(color_def[5:7], 16),
-                )
-            )
-
-        named_colors = _get_named_colors()
-        if color_def in named_colors:
-            color_num = _color_from_num(named_colors[color_def])
-        else:
-            try:
-                color_num = _color_from_num(int(color_def, 0))
-            except ValueError:
-                _warn(
-                    "Ignoring color",
-                    color_def,
-                    "that's neither " "predefined nor a number",
-                )
-                return -1
-
-        if not -1 <= color_num < curses.COLORS:
-            _warn(
-                "Ignoring color {}, which is outside the range "
-                "-1..curses.COLORS-1 (-1..{})".format(color_def, curses.COLORS - 1)
-            )
-            return -1
-
-        return color_num
-
-    fg_color = -1
-    bg_color = -1
-    attrs = 0
-
-    if style_def:
-        for field in style_def.split(","):
-            if field.startswith("fg:"):
-                fg_color = parse_color(field)
-            elif field.startswith("bg:"):
-                bg_color = parse_color(field)
-            elif field == "bold":
-                # A_BOLD tends to produce faint and hard-to-read text on the
-                # Windows console, especially with the old color scheme, before
-                # the introduction of
-                # https://blogs.msdn.microsoft.com/commandline/2017/08/02/updating-the-windows-console-colors/
-                attrs |= curses.A_NORMAL if _IS_WINDOWS else curses.A_BOLD
-            elif field == "standout":
-                attrs |= curses.A_STANDOUT
-            elif field == "underline":
-                attrs |= curses.A_UNDERLINE
-            else:
-                _warn("Ignoring unknown style attribute", field)
-
-    return _style_attr(fg_color, bg_color, attrs)
-
-
 def _init_styles():
-    if curses.has_colors():
-        try:
-            curses.use_default_colors()
-        except curses.error:
-            # Ignore errors on funky terminals that support colors but not
-            # using default colors. Worst it can do is break transparency and
-            # the like. Ran across this with the MSYS2/winpty setup in
-            # https://github.com/msys2/MINGW-packages/issues/5823, though there
-            # seems to be a lot of general brokenness there.
-            pass
-
-        # Use the 'linux' theme as the base, and add any user-defined style
-        # settings from the environment
-        _parse_style("linux", True)
-        if "MENUCONFIG_STYLE" in os.environ:
-            _parse_style(os.environ["MENUCONFIG_STYLE"], False)
-    else:
-        # Force the 'monochrome' theme if the terminal doesn't support colors.
-        # MENUCONFIG_STYLE is likely to mess things up here (though any colors
-        # would be ignored), so ignore it.
-        _parse_style("monochrome", True)
-
-
-# color_attribs holds the color pairs we've already created, indexed by a
-# (<foreground color>, <background color>) tuple.
-#
-# Obscure Python: We never pass a value for color_attribs, and it keeps
-# pointing to the same dict. This avoids a global.
-def _style_attr(fg_color, bg_color, attribs, color_attribs={}):
-    # Returns an attribute with the specified foreground and background color
-    # and the attributes in 'attribs'. Reuses color pairs already created if
-    # possible, and creates a new color pair otherwise.
-    #
-    # Returns 'attribs' if colors aren't supported.
-
-    if not curses.has_colors():
-        return attribs
-
-    if (fg_color, bg_color) not in color_attribs:
-        # Create new color pair. Color pair number 0 is hardcoded and cannot be
-        # changed, hence the +1s.
-        curses.init_pair(len(color_attribs) + 1, fg_color, bg_color)
-        color_attribs[(fg_color, bg_color)] = curses.color_pair(len(color_attribs) + 1)
-
-    return color_attribs[(fg_color, bg_color)] | attribs
+    # Use the 'linux' theme as the base, and add any user-defined style
+    # settings from the environment
+    _parse_style("linux", True)
+    if "MENUCONFIG_STYLE" in os.environ:
+        _parse_style(os.environ["MENUCONFIG_STYLE"], False)
 
 
 #
 # Main application
 #
-
-
-def _ensure_curses():
-    """
-    Imports curses module if not already imported. This allows the module
-    to be imported in headless CI/CD environments without triggering import
-    errors, as long as menuconfig() is not called.
-    """
-    global curses
-    if curses is not None:
-        return
-
-    try:
-        import curses as curses_module
-
-        curses = curses_module
-    except ImportError as e:
-        if not _IS_WINDOWS:
-            raise
-        sys.exit("""\
-menuconfig failed to import the standard Python 'curses' library. Try
-installing a package like windows-curses
-(https://github.com/zephyrproject-rtos/windows-curses) by running this command
-in cmd.exe:
-
-    pip install windows-curses
-
-Starting with Kconfiglib 13.0.0, windows-curses is no longer automatically
-installed when installing Kconfiglib via pip on Windows (because it breaks
-installation on MSYS2).
-
-Exception:
-{}: {}""".format(type(e).__name__, e))
 
 
 def _main():
@@ -726,10 +450,6 @@ def menuconfig(kconf, headless=False):
       processing. In headless mode, the function only loads the configuration
       and returns immediately without user interaction.
     """
-    # Import curses at runtime to avoid issues in headless environments
-    if not headless:
-        _ensure_curses()
-
     global _kconf
     global _conf_filename
     global _conf_changed
@@ -761,12 +481,12 @@ def menuconfig(kconf, headless=False):
             )
             return
 
-    # Disable warnings. They get mangled in curses mode, and we deal with
+    # Disable warnings. They get mangled in terminal mode, and we deal with
     # errors ourselves.
     kconf.warn = False
 
     try:
-        # Make curses use the locale settings specified in the environment
+        # Make the locale settings specified in the environment active
         locale.setlocale(locale.LC_ALL, "")
     except locale.Error:
         # fall back to the default locale
@@ -780,68 +500,9 @@ def menuconfig(kconf, headless=False):
     if headless:
         return
 
-    # Get rid of the delay between pressing ESC and jumping to the parent menu,
-    # unless the user has set ESCDELAY (see ncurses(3)). This makes the UI much
-    # smoother to work with.
-    #
-    # Note: This is strictly pretty iffy, since escape codes for e.g. cursor
-    # keys start with ESC, but I've never seen it cause problems in practice
-    # (probably because it's unlikely that the escape code for a key would get
-    # split up across read()s, at least with a terminal emulator). Please
-    # report if you run into issues. Some suitable small default value could be
-    # used here instead in that case. Maybe it's silly to not put in the
-    # smallest imperceptible delay here already, though I don't like guessing.
-    #
-    # (From a quick glance at the ncurses source code, ESCDELAY might only be
-    # relevant for mouse events there, so maybe escapes are assumed to arrive
-    # in one piece already...)
-    os.environ.setdefault("ESCDELAY", "0")
-
-    # Enter curses mode. _menuconfig() returns a string to print on exit, after
-    # curses has been de-initialized.
-    print(_wrapper(_menuconfig))
-
-
-def _wrapper(func):
-    # Workaround for windows-curses bug on Python 3.12+
-    # See: https://github.com/zephyrproject-rtos/windows-curses/issues/50
-    if os.name == "nt" and sys.version_info >= (3, 12):
-        stdscr = None
-        try:
-            import _curses
-        except ImportError:
-            # _curses not available, fall back to standard wrapper
-            return curses.wrapper(func)
-
-        try:
-            # setupterm() crashes on Python 3.12 with windows-curses
-            stdscr = _curses.initscr()
-
-            # Copy ACS_* and LINES/COLS to curses module
-            for key, value in _curses.__dict__.items():
-                if key.startswith("ACS_") or key in ("LINES", "COLS"):
-                    setattr(curses, key, value)
-
-            curses.noecho()
-            curses.cbreak()
-
-            try:
-                curses.start_color()
-            except curses.error:
-                # Color support not available
-                pass
-
-            if stdscr is not None:
-                stdscr.keypad(True)
-                return func(stdscr)
-        finally:
-            if stdscr is not None:
-                stdscr.keypad(False)
-            curses.echo()
-            curses.nocbreak()
-            curses.endwin()
-    else:
-        return curses.wrapper(func)
+    # Enter terminal mode via rawterm. _menuconfig() returns a string to print
+    # on exit.
+    print(rawterm.run(_menuconfig))
 
 
 def _load_config():
@@ -865,8 +526,8 @@ def _needs_save():
 
 # Global variables used below:
 #
-#   _stdscr:
-#     stdscr from curses
+#   _term:
+#     rawterm.Terminal instance
 #
 #   _cur_menu:
 #     Menu node of the menu (or menuconfig symbol, or choice) currently being
@@ -905,50 +566,100 @@ def _needs_save():
 #     from the save dialog.
 
 
-def _menuconfig(stdscr):
+def _menuconfig(term):
     # Logic for the main display, with the list of symbols, etc.
 
-    global _stdscr
+    global _term
     global _conf_filename
     global _conf_changed
     global _minconf_filename
     global _show_help
     global _show_name
+    global _active_button
 
-    _stdscr = stdscr
+    _term = term
 
     _init()
 
     while True:
         _draw_main()
-        curses.doupdate()
+        _term.update()
 
-        c = _getch_compat(_menu_win)
+        c = _term.read_key()
 
-        if c == curses.KEY_RESIZE:
+        if c == Key.RESIZE:
             _resize_main()
 
-        elif c in (curses.KEY_DOWN, "j", "J"):
+        #
+        # Menu item navigation (Up/Down/PgUp/PgDn/Home/End)
+        #
+
+        elif c in (Key.DOWN, "j", "J"):
             _select_next_menu_entry()
 
-        elif c in (curses.KEY_UP, "k", "K"):
+        elif c in (Key.UP, "k", "K"):
             _select_prev_menu_entry()
 
-        elif c in (curses.KEY_NPAGE, "\x04"):  # Page Down/Ctrl-D
-            # Keep it simple. This way we get sane behavior for small windows,
-            # etc., for free.
+        elif c in (Key.PAGE_DOWN, "\x04"):  # Page Down/Ctrl-D
             for _ in range(_PG_JUMP):
                 _select_next_menu_entry()
 
-        elif c in (curses.KEY_PPAGE, "\x15"):  # Page Up/Ctrl-U
+        elif c in (Key.PAGE_UP, "\x15"):  # Page Up/Ctrl-U
             for _ in range(_PG_JUMP):
                 _select_prev_menu_entry()
 
-        elif c in (curses.KEY_END, "G"):
+        elif c in (Key.END, "G"):
             _select_last_menu_entry()
 
-        elif c in (curses.KEY_HOME, "g"):
+        elif c in (Key.HOME, "g"):
             _select_first_menu_entry()
+
+        #
+        # Button navigation (Tab/Left/Right cycle buttons, matching mconf)
+        #
+
+        elif c == "\t" or c == Key.RIGHT:
+            _active_button = (_active_button + 1) % len(_MENU_BUTTONS)
+
+        elif c == Key.LEFT:
+            _active_button = (_active_button - 1) % len(_MENU_BUTTONS)
+
+        #
+        # Enter activates the currently focused button (matching mconf)
+        #
+
+        elif c == "\n":
+            if _active_button == 0:  # Select
+                sel_node = _shown[_sel_node_i]
+                if not _enter_menu(sel_node):
+                    _change_node(sel_node)
+
+            elif _active_button == 1:  # Exit
+                if _cur_menu is _kconf.top_node:
+                    res = _quit_dialog()
+                    if res:
+                        return res
+                else:
+                    _leave_menu()
+
+            elif _active_button == 2:  # Help
+                _info_dialog(_shown[_sel_node_i], False)
+                _resize_main()
+
+            elif _active_button == 3:  # Save
+                filename = _save_dialog(
+                    _kconf.write_config, _conf_filename, "configuration"
+                )
+                if filename:
+                    _conf_filename = filename
+                    _conf_changed = False
+
+            elif _active_button == 4:  # Load
+                _load_dialog()
+
+        #
+        # Direct item operations (matching mconf key codes)
+        #
 
         elif c == " ":
             # Toggle the node if possible
@@ -956,8 +667,8 @@ def _menuconfig(stdscr):
             if not _change_node(sel_node):
                 _enter_menu(sel_node)
 
-        elif c in (curses.KEY_RIGHT, "\n", "l", "L"):
-            # Enter the node if possible
+        elif c in ("l", "L"):
+            # Vi: enter menu/toggle item
             sel_node = _shown[_sel_node_i]
             if not _enter_menu(sel_node):
                 _change_node(sel_node)
@@ -971,16 +682,18 @@ def _menuconfig(stdscr):
         elif c in ("y", "Y"):
             _set_sel_node_tri_val(2)
 
-        elif c in (
-            curses.KEY_LEFT,
-            curses.KEY_BACKSPACE,
-            _ERASE_CHAR,
-            "\x1b",
-            "h",
-            "H",
-        ):  # \x1B = ESC
-
+        elif c in (Key.BACKSPACE, "\x1b", "h", "H"):
+            # Leave menu (ESC/Backspace/Vi H)
             if c == "\x1b" and _cur_menu is _kconf.top_node:
+                res = _quit_dialog()
+                if res:
+                    return res
+            else:
+                _leave_menu()
+
+        elif c in ("e", "x", "E", "X"):
+            # Exit (mconf: 'e' and 'x' trigger ESC behavior)
+            if _cur_menu is _kconf.top_node:
                 res = _quit_dialog()
                 if res:
                     return res
@@ -1007,25 +720,20 @@ def _menuconfig(stdscr):
 
         elif c == "/":
             _jump_to_dialog()
-            # The terminal might have been resized while the fullscreen jump-to
-            # dialog was open
             _resize_main()
 
         elif c == "?":
             _info_dialog(_shown[_sel_node_i], False)
-            # The terminal might have been resized while the fullscreen info
-            # dialog was open
             _resize_main()
 
         elif c in ("f", "F"):
             _show_help = not _show_help
-            _set_style(_help_win, "show-help" if _show_help else "help")
             _resize_main()
 
         elif c in ("c", "C"):
             _show_name = not _show_name
 
-        elif c in ("a", "A"):
+        elif c in ("a", "A", "z", "Z"):
             _toggle_show_all()
 
         elif c in ("q", "Q"):
@@ -1074,15 +782,24 @@ def _quit_dialog():
 def _init():
     # Initializes the main display with the list of symbols, etc. Also does
     # misc. global initialization that needs to happen after initializing
-    # curses.
+    # the terminal.
+    #
+    # The layout matches mconf/lxdialog's dialog_menu():
+    #   _screen_win  - full screen background (cyan/blue)
+    #   _dialog_win  - centered dialog body (white, with border/title/
+    #                  instructions/inner menu box/separator/buttons)
+    #   _menu_win    - inner menu item area (positioned inside the dialog)
+    #   _help_win    - help text (show-help mode only)
+    #
+    # Shadow regions for the dialog are created in _resize_main().
 
-    global _ERASE_CHAR
-
-    global _path_win
-    global _top_sep_win
+    global _screen_win
+    global _dialog_win
     global _menu_win
-    global _bot_sep_win
     global _help_win
+    global _dlg_bottom_shadow
+    global _dlg_right_shadow
+    global _active_button
 
     global _parent_screen_rows
     global _cur_menu
@@ -1093,39 +810,32 @@ def _init():
     global _show_help
     global _show_name
 
-    # Looking for this in addition to KEY_BACKSPACE (which is unreliable) makes
-    # backspace work with TERM=vt100. That makes it likely to work in sane
-    # environments.
-    # erasechar() returns a one-byte bytes object. This sets _ERASE_CHAR to a
-    # blank string if it can't be decoded, which should be harmless.
-    _ERASE_CHAR = curses.erasechar().decode("utf-8", "ignore")
-
     _init_styles()
 
-    # Set stdscr background to match main list style
-    # This ensures areas not covered by subwindows have correct background
-    _stdscr.bkgd(" ", _style.get("list", 0))
-
     # Hide the cursor
-    _safe_curs_set(0)
+    _term.hide_cursor()
 
-    # Initialize windows
+    # Initialize regions -- creation order determines compositing order
+    # (painter's algorithm: later regions paint on top of earlier ones)
 
-    # Top row, with menu path
-    _path_win = _styled_win("path")
+    # Full-screen background (lowest layer)
+    _screen_win = _styled_region("screen")
 
-    # Separator below menu path, with title and arrows pointing up
-    _top_sep_win = _styled_win("separator")
+    # The main dialog body (above screen background)
+    _dialog_win = _styled_region("body")
 
-    # List of menu entries with symbols, etc.
-    _menu_win = _styled_win("list")
-    _menu_win.keypad(True)
+    # Inner menu item area (above dialog body)
+    _menu_win = _styled_region("list")
 
-    # Row below menu list, with arrows pointing down
-    _bot_sep_win = _styled_win("separator")
+    # Help text window for show-help mode (above dialog, initially hidden)
+    _help_win = _styled_region("show-help")
 
-    # Help window with keys at the bottom. Shows help texts in show-help mode.
-    _help_win = _styled_win("help")
+    # Shadow regions -- created in _resize_main()
+    _dlg_bottom_shadow = None
+    _dlg_right_shadow = None
+
+    # Currently focused button (0=Select, 1=Exit, 2=Help, 3=Save, 4=Load)
+    _active_button = 0
 
     # The rows we'd like the nodes in the parent menus to appear on. This
     # prevents the scroll from jumping around when going in and out of menus.
@@ -1139,68 +849,112 @@ def _init():
 
     _show_help = _show_name = False
 
-    # Give windows their initial size
+    # Give regions their initial size
     _resize_main()
 
 
 def _resize_main():
-    # Resizes the main display, with the list of symbols, etc., to fill the
-    # terminal
+    # Resizes the main display to match mconf/lxdialog's dialog_menu() layout.
+    #
+    # Layout (matching menubox.c):
+    #   Screen background (full terminal, cyan/blue):
+    #     Row 0: backtitle (mainmenu_text)
+    #     Row 1: subtitle path + hline
+    #   Shadow (right 2 cols + bottom 1 row of dialog)
+    #   Dialog (centered, white background):
+    #     Row 0:            top border with title
+    #     Rows 1..box_y-1:  instruction text
+    #     Row box_y:        inner menu box top border
+    #     Rows box_y+1...:  menu items (menu_height rows)
+    #     Row box_y+mh+1:   inner menu box bottom border
+    #     Row dlg_h-3:      separator (LTEE + HLINE + RTEE)
+    #     Row dlg_h-2:      buttons
+    #     Row dlg_h-1:      bottom border
+    #   Menu items region (_menu_win) overlaid inside the inner box
 
     global _menu_scroll
+    global _dlg_bottom_shadow
+    global _dlg_right_shadow
 
-    screen_height, screen_width = _stdscr.getmaxyx()
+    screen_height = _term.height
+    screen_width = _term.width
 
-    help_win_height = _SHOW_HELP_HEIGHT if _show_help else len(_MAIN_HELP_LINES)
+    # Dialog dimensions -- matching mconf/lxdialog/menubox.c dialog_menu()
+    dlg_height = screen_height - 4
+    dlg_width = screen_width - 5
 
-    # Screen layout:
-    # Row 0: _path_win, Row 1: _top_sep_win, Row 2+: _menu_win
-    # Row (2+menu_win_height): _bot_sep_win
-    # Row (2+menu_win_height+1): _help_win
-    # Total: 1 + 1 + menu_win_height + 1 + help_win_height = screen_height
-    menu_win_height = screen_height - help_win_height - 3
-    menu_win_width = screen_width
+    # Clamp to minimum usable sizes
+    if dlg_height < 10:
+        dlg_height = max(screen_height - 2, 6)
+    if dlg_width < 40:
+        dlg_width = max(screen_width - 2, 20)
 
-    _path_win.resize(1, screen_width)
-    _top_sep_win.resize(1, menu_win_width)
+    # Menu item area dimensions within the dialog
+    # mconf: menu_height = height - 10;  menu_width = width - 6;
+    menu_height = max(dlg_height - 10, 1)
+    menu_width = max(dlg_width - 6, 10)
 
-    if menu_win_height >= 1:
-        _menu_win.resize(menu_win_height, menu_win_width)
-        _bot_sep_win.resize(1, menu_win_width)
-        # _help_win uses full screen width for blue background to extend to right edge
-        _help_win.resize(help_win_height, screen_width)
+    # In show-help mode, steal rows from the menu area for help text
+    help_in_dialog = 0
+    if _show_help:
+        help_in_dialog = min(_SHOW_HELP_HEIGHT, max(menu_height - 2, 0))
+        menu_height = max(menu_height - help_in_dialog, 1)
 
-        _top_sep_win.mvwin(1, 0)
-        _menu_win.mvwin(2, 0)
-        _bot_sep_win.mvwin(2 + menu_win_height, 0)
-        _help_win.mvwin(2 + menu_win_height + 1, 0)
+    # Menu box position within dialog
+    # mconf: box_y = height - menu_height - 5;
+    #        box_x = (width - menu_width) / 2 - 1;
+    box_y = dlg_height - menu_height - 5 - help_in_dialog
+    box_x = (dlg_width - menu_width) // 2 - 1
+    if box_y < 1:
+        box_y = 1
+
+    # Center dialog on screen
+    dlg_y = (screen_height - dlg_height) // 2
+    dlg_x = (screen_width - dlg_width) // 2
+
+    # --- Resize and position regions ---
+
+    # Screen background
+    _screen_win.resize(screen_height, screen_width)
+    _screen_win.move(0, 0)
+    _screen_win.fill(_style["screen"])
+
+    # Dialog body
+    _dialog_win.resize(dlg_height, dlg_width)
+    _dialog_win.move(dlg_y, dlg_x)
+    _dialog_win.fill(_style["body"])
+
+    # Menu items (positioned inside the inner menu box of the dialog)
+    _menu_win.resize(menu_height, menu_width)
+    _menu_win.move(dlg_y + box_y + 1, dlg_x + box_x + 1)
+    _menu_win.fill(_style["list"])
+
+    # Help window -- positioned below inner menu box in show-help mode,
+    # or moved off-screen when not needed
+    if _show_help and help_in_dialog > 0:
+        help_y = dlg_y + box_y + menu_height + 2
+        _help_win.resize(help_in_dialog, menu_width)
+        _help_win.move(help_y, dlg_x + box_x + 1)
+        _help_win.fill(_style["show-help"])
     else:
-        # Degenerate case. Give up on nice rendering and just prevent errors.
+        _help_win.resize(1, 1)
+        _help_win.move(screen_height, 0)  # off-screen
 
-        menu_win_height = 1
+    # Shadow regions for the dialog
+    _close_shadow_windows(_dlg_bottom_shadow, _dlg_right_shadow)
+    _dlg_bottom_shadow, _dlg_right_shadow = _create_shadow_for_win(_dialog_win)
 
-        _menu_win.resize(1, screen_width)
-        _help_win.resize(1, screen_width)
-
-        for win in _top_sep_win, _menu_win, _bot_sep_win, _help_win:
-            win.mvwin(0, 0)
-
-    # Adjust the scroll so that the selected node is still within the window,
-    # if needed
-    if _sel_node_i - _menu_scroll >= menu_win_height:
-        _menu_scroll = _sel_node_i - menu_win_height + 1
+    # Adjust the scroll so that the selected node is still within the window
+    if _sel_node_i - _menu_scroll >= menu_height:
+        _menu_scroll = _sel_node_i - menu_height + 1
 
 
 def _height(win):
-    # Returns the height of 'win'
-
-    return win.getmaxyx()[0]
+    return win.height
 
 
 def _width(win):
-    # Returns the width of 'win'
-
-    return win.getmaxyx()[1]
+    return win.width
 
 
 def _enter_menu(menu):
@@ -1457,181 +1211,252 @@ def _center_vertically():
 
 
 def _draw_main():
-    # Draws the "main" display, with the list of symbols, the header, and the
-    # footer.
-    #
-    # This could be optimized to only update the windows that have actually
-    # changed, but keep it simple for now and let curses sort it out.
+    # Draws the mconf-style "main" display: screen background with path,
+    # centered dialog with title/instructions/inner menu box/buttons, and
+    # shadow.
 
-    term_width = _width(_stdscr)
+    screen_height = _term.height
+    screen_width = _term.width
+    dlg_h = _height(_dialog_win)
+    dlg_w = _width(_dialog_win)
 
-    #
-    # Update the separator row below the menu path
-    #
+    menu_height = _height(_menu_win)
+    menu_width = _width(_menu_win)
 
-    _top_sep_win.erase()
+    # --- Compute inner box position within the dialog ---
+    # These must match _resize_main() calculations.
+    help_in_dialog = 0
+    if _show_help:
+        help_in_dialog = min(_SHOW_HELP_HEIGHT, max(dlg_h - 10 - 2, 0))
+        # Recalculate menu_height for positioning only (actual size is from
+        # the _menu_win region).
+    box_y = dlg_h - menu_height - 5 - help_in_dialog
+    box_x = (dlg_w - menu_width) // 2 - 1
+    if box_y < 1:
+        box_y = 1
 
-    # Add the 'mainmenu' text as the title, centered at the top
-    # Use _top_sep_win width instead of term_width for correct centering
-    top_sep_width = _width(_top_sep_win)
-    _safe_addstr(
-        _top_sep_win,
-        0,
-        max((top_sep_width - len(_kconf.mainmenu_text)) // 2, 0),
-        _kconf.mainmenu_text,
-    )
-
-    _top_sep_win.noutrefresh()
-
-    # Note: The menu path at the top is deliberately updated last. See below.
-
-    #
-    # Update the symbol window
-    #
-
-    _menu_win.erase()
-
-    # Draw box around the menu window (like lxdialog's menubox)
-    menu_win_height, menu_win_width = _menu_win.getmaxyx()
-    _draw_box(
-        _menu_win, 0, 0, menu_win_height, menu_win_width, _style["list"], _style["list"]
-    )
-
-    # Calculate max scroll for scrollbar
-    max_scroll = _max_scroll(_shown, _menu_win)
-
-    # Determine text display width (leave space for scrollbar if needed)
-    if max_scroll > 0:
-        text_display_width = (
-            menu_win_width - 4
-        )  # Leave space for: border(1) + text(1) + scrollbar(1) + border(1)
+    # item_x: indent of menu items within the inner box (matching mconf)
+    if menu_width >= 80:
+        item_x = (menu_width - 70) // 2
     else:
-        text_display_width = menu_win_width - 2  # Normal: border(1) on each side
+        item_x = 4
 
-    # Draw the _shown nodes starting from index _menu_scroll up to either as
-    # many as fit in the window, or to the end of _shown
-    # Note: Now we need to account for the border (1 character on each side)
-    for i in range(
-        _menu_scroll, min(_menu_scroll + _height(_menu_win) - 2, len(_shown))
-    ):
+    # ---------------------------------------------------------------
+    # 1. Screen background
+    # ---------------------------------------------------------------
+    _screen_win.clear()
 
-        node = _shown[i]
+    screen_style = _style["screen"]
 
-        # The 'not _show_all' test avoids showing invisible items in red
-        # outside show-all mode, which could look confusing/broken. Invisible
-        # symbols show up outside show-all mode if an invisible symbol has
-        # visible children in an implicit (indented) menu.
-        if _visible(node) or not _show_all:
-            style = _style["selection" if i == _sel_node_i else "list"]
-        else:
-            style = _style["inv-selection" if i == _sel_node_i else "inv-list"]
+    # Backtitle at row 0 (like mconf's dialog_clear() + backtitle)
+    _screen_win.write(0, 1, _kconf.mainmenu_text, screen_style)
 
-        # Draw inside the box (offset by 1 row and 1 column)
-        # Truncate text if scrollbar is present
-        node_text = _node_str(node)
-        if max_scroll > 0:
-            node_text = node_text[:text_display_width]
-        _safe_addstr(_menu_win, 1 + i - _menu_scroll, 1, node_text, style)
-
-    # Draw scrollbar if content is scrollable
-    if max_scroll > 0:
-        _draw_scrollbar(
-            _menu_win,
-            _menu_scroll,
-            max_scroll,
-            menu_win_width - 2,
-            1,
-            menu_win_height - 2,
-            _style["list"],
-            _style.get("selection", _style["list"]),
+    # Subtitle path at row 1 (like mconf's subtitle trail)
+    subtitle_parts = []
+    menu = _cur_menu
+    while menu is not _kconf.top_node:
+        subtitle_parts.append(
+            menu.prompt[0] if menu.prompt else standard_sc_expr_str(menu.item)
         )
+        menu = menu.parent
+    subtitle_parts.reverse()
 
-    _menu_win.noutrefresh()
+    if subtitle_parts:
+        path_str = ""
+        for part in subtitle_parts:
+            path_str += Box.RARROW + " " + part + " "
+        _screen_win.write(1, 1, path_str[: screen_width - 2], screen_style)
+        hline_start = min(1 + len(path_str), screen_width - 1)
+    else:
+        hline_start = 1
 
-    #
-    # Update the bottom separator window
-    #
+    # Fill rest of row 1 with horizontal line
+    for j in range(hline_start, screen_width - 1):
+        _screen_win.write_char(1, j, Box.HLINE, screen_style)
 
-    _bot_sep_win.erase()
-
-    # Indicate when show-name/show-help/show-all mode is enabled
+    # Mode indicators on screen background (show-name/show-all/show-help)
     enabled_modes = []
     if _show_help:
-        enabled_modes.append("show-help (toggle with [F])")
+        enabled_modes.append("show-help")
     if _show_name:
         enabled_modes.append("show-name")
     if _show_all:
         enabled_modes.append("show-all")
     if enabled_modes:
-        s = " and ".join(enabled_modes) + " mode enabled"
-        _safe_addstr(_bot_sep_win, 0, max(term_width - len(s) - 2, 0), s)
+        mode_str = "[" + "+".join(enabled_modes) + "]"
+        _screen_win.write(
+            0,
+            max(screen_width - len(mode_str) - 1, 0),
+            mode_str,
+            screen_style,
+        )
 
-    _bot_sep_win.noutrefresh()
+    # ---------------------------------------------------------------
+    # 2. Dialog body
+    # ---------------------------------------------------------------
+    _dialog_win.clear()
 
-    #
-    # Update the help window, which shows either key bindings or help texts
-    #
+    body_style = _style["body"]
+    border_style = _style.get("border", _style["frame"])
 
-    _help_win.erase()
+    # Outer dialog box: body for interior, frame for border
+    # Matches mconf: draw_box(dialog, 0, 0, h, w, dlg.dialog.atr, dlg.border.atr)
+    _draw_box(_dialog_win, 0, 0, dlg_h, dlg_w, body_style, border_style)
 
-    if _show_help:
+    # Separator line (LTEE + HLINE + RTEE) at row dlg_h - 3
+    _dialog_win.write_char(dlg_h - 3, 0, Box.LTEE, border_style)
+    for j in range(1, dlg_w - 1):
+        _dialog_win.write_char(dlg_h - 3, j, Box.HLINE, border_style)
+    _dialog_win.write_char(dlg_h - 3, dlg_w - 1, Box.RTEE, border_style)
+
+    # Title centered in top border (like mconf's print_title())
+    title = _cur_menu.prompt[0] if _cur_menu.prompt else _kconf.mainmenu_text
+    title_style = _style.get("title", border_style)
+    tlen = min(dlg_w - 2, len(title))
+    title_x = (dlg_w - tlen) // 2
+    _dialog_win.write_char(0, title_x - 1, " ", title_style)
+    _dialog_win.write(0, title_x, title[:tlen], title_style)
+    _dialog_win.write_char(0, title_x + tlen, " ", title_style)
+
+    # Instruction text (autowrapped, like mconf's print_autowrap())
+    # mconf: print_autowrap(dialog, prompt, width - 2, 1, 3)
+    # Centers text if the entire string fits in one line, otherwise
+    # wraps at column 3 with width (width - 2).
+    inst_x = 3
+    inst_width = dlg_w - 2 * inst_x
+    if inst_width > 0:
+        if len(_MENU_INSTRUCTIONS) <= inst_width:
+            # Entire text fits -- center it (like mconf's
+            # print_text_centered)
+            cx = (dlg_w - len(_MENU_INSTRUCTIONS)) // 2
+            _dialog_win.write(1, cx, _MENU_INSTRUCTIONS, body_style)
+        else:
+            inst_lines = textwrap.wrap(_MENU_INSTRUCTIONS, inst_width)
+            for idx, line in enumerate(inst_lines):
+                row = 1 + idx
+                if row >= box_y:
+                    break
+                _dialog_win.write(row, inst_x, line, body_style)
+
+    # Inner menu box (like mconf's inner draw_box for the menu area)
+    # mconf: draw_box(dialog, box_y, box_x, mh+2, mw+2,
+    #                 dlg.menubox_border.atr, dlg.menubox.atr)
+    # box = menubox_border (white/white/bold), border = menubox (black/white)
+    inner_box_style = _style.get("menubox-border", _style["frame"])
+    inner_border_style = _style.get("menubox", _style["list"])
+    _draw_box(
+        _dialog_win,
+        box_y,
+        box_x,
+        menu_height + 2,
+        menu_width + 2,
+        inner_box_style,
+        inner_border_style,
+    )
+
+    # Scroll arrows (like mconf's print_arrows())
+    _draw_scroll_arrows(
+        _dialog_win,
+        len(_shown),
+        _menu_scroll,
+        box_y,
+        box_x + item_x + 1,
+        menu_height,
+        _style["list"],
+        border_style,
+    )
+
+    # Buttons (like mconf's print_buttons())
+    _draw_main_buttons(_dialog_win, dlg_h, dlg_w)
+
+    # ---------------------------------------------------------------
+    # 3. Menu items (drawn into _menu_win, positioned inside inner box)
+    # ---------------------------------------------------------------
+    _menu_win.clear()
+
+    text_width = menu_width - item_x
+    for i in range(_menu_scroll, min(_menu_scroll + menu_height, len(_shown))):
+        node = _shown[i]
+
+        if _visible(node) or not _show_all:
+            style = _style["selection" if i == _sel_node_i else "list"]
+        else:
+            style = _style["inv-selection" if i == _sel_node_i else "inv-list"]
+
+        # Clear entire row with list style, then draw text
+        _menu_win.write(i - _menu_scroll, 0, " " * menu_width, _style["list"])
+
+        node_text = _node_str(node)
+        node_text = node_text[:text_width].ljust(text_width)
+        _menu_win.write(i - _menu_scroll, item_x, node_text, style)
+
+    # ---------------------------------------------------------------
+    # 4. Help text (show-help mode only)
+    # ---------------------------------------------------------------
+    if _show_help and _help_win.height > 1:
+        _help_win.clear()
         node = _shown[_sel_node_i]
+        sh_style = _style["show-help"]
         if isinstance(node.item, (Symbol, Choice)) and node.help:
             help_lines = textwrap.wrap(node.help, _width(_help_win))
             for i in range(min(_height(_help_win), len(help_lines))):
-                _safe_addstr(_help_win, i, 0, help_lines[i])
+                _help_win.write(i, 0, help_lines[i], sh_style)
         else:
-            _safe_addstr(_help_win, 0, 0, "(no help)")
+            _help_win.write(0, 0, "(no help)", sh_style)
+
+    # ---------------------------------------------------------------
+    # 5. Shadow
+    # ---------------------------------------------------------------
+    _refresh_shadow_windows(_dlg_bottom_shadow, _dlg_right_shadow)
+
+
+def _draw_scroll_arrows(
+    win, item_count, scroll, box_y, x, menu_height, menubox_style, border_style
+):
+    # Draw scroll indicator arrows matching mconf/lxdialog's print_arrows().
+    #
+    # When scrolled up: up-arrow "^(-)" at the top of the inner box
+    # When more below: down-arrow "v(+)" at the bottom of the inner box
+    # Otherwise: horizontal lines (part of the box border)
+
+    # Up arrow position: box_y row, at x
+    if scroll > 0:
+        win.write_char(box_y, x, Box.UARROW, border_style)
+        win.write(box_y, x + 1, "(-)", border_style)
     else:
-        for i, line in enumerate(_MAIN_HELP_LINES):
-            _safe_addstr(_help_win, i, 0, line)
+        for j in range(4):
+            if x + j < _width(win) - 1:
+                win.write_char(box_y, x + j, Box.HLINE, menubox_style)
 
-    _help_win.noutrefresh()
+    # Down arrow position: box_y + menu_height + 1 row, at x
+    down_y = box_y + menu_height + 1
+    if menu_height < item_count and scroll + menu_height < item_count:
+        win.write_char(down_y, x, Box.DARROW, border_style)
+        win.write(down_y, x + 1, "(+)", border_style)
+    else:
+        for j in range(4):
+            if x + j < _width(win) - 1:
+                win.write_char(down_y, x + j, Box.HLINE, border_style)
 
+
+def _draw_main_buttons(win, dlg_h, dlg_w):
+    # Draw the 5 main menu buttons matching mconf/lxdialog's print_buttons().
     #
-    # Update the top row with the menu path.
-    #
-    # Doing this last leaves the cursor on the top row, which avoids some minor
-    # annoying jumpiness in gnome-terminal when reducing the height of the
-    # terminal. It seems to happen whenever the row with the cursor on it
-    # disappears.
-    #
+    # In mconf, buttons are spaced 12 apart starting at (width/2 - 28):
+    #   print_button(win, "Select", y, x,      selected == 0);
+    #   print_button(win, " Exit ", y, x + 12, selected == 1);
+    #   print_button(win, " Help ", y, x + 24, selected == 2);
+    #   print_button(win, " Save ", y, x + 36, selected == 3);
+    #   print_button(win, " Load ", y, x + 48, selected == 4);
 
-    _path_win.erase()
+    button_y = dlg_h - 2
+    start_x = max(dlg_w // 2 - 28, 1)
 
-    # Draw the menu path ("(Top) -> Menu -> Submenu -> ...")
-
-    menu_prompts = []
-
-    menu = _cur_menu
-    while menu is not _kconf.top_node:
-        # Promptless choices can be entered in show-all mode. Use
-        # standard_sc_expr_str() for them, so they show up as
-        # '<choice (name if any)>'.
-        menu_prompts.append(
-            menu.prompt[0] if menu.prompt else standard_sc_expr_str(menu.item)
-        )
-        menu = menu.parent
-    menu_prompts.append("(Top)")
-    menu_prompts.reverse()
-
-    # Hack: We can't put ACS_RARROW directly in the string. Temporarily
-    # represent it with NULL.
-    menu_path_str = " \0 ".join(menu_prompts)
-
-    # Scroll the menu path to the right if needed to make the current menu's
-    # title visible
-    if len(menu_path_str) > term_width:
-        menu_path_str = menu_path_str[len(menu_path_str) - term_width :]
-
-    # Print the path with the arrows reinserted
-    split_path = menu_path_str.split("\0")
-    _safe_addstr(_path_win, split_path[0])
-    for s in split_path[1:]:
-        _safe_addch(_path_win, curses.ACS_RARROW)
-        _safe_addstr(_path_win, s)
-
-    _path_win.noutrefresh()
+    for i, label in enumerate(_MENU_BUTTONS):
+        bx = start_x + i * 12
+        if bx + len(label) + 2 > dlg_w:
+            break
+        _print_button(win, label, button_y, bx, i == _active_button)
 
 
 def _parent_menu(node):
@@ -1878,68 +1703,75 @@ def _input_dialog(title, initial_text, info_text=None):
     #   String to show next to the input field. If None, just the input field
     #   is shown.
 
-    win = _styled_win("body")
-    win.keypad(True)
+    win = None
+    bottom_shadow = right_shadow = None
 
-    info_lines = info_text.split("\n") if info_text else []
+    try:
+        win = _styled_region("body")
 
-    # Give the input dialog its initial size
-    _resize_input_dialog(win, title, info_lines)
+        info_lines = info_text.split("\n") if info_text else []
 
-    _safe_curs_set(2)
+        # Give the input dialog its initial size
+        _resize_input_dialog(win, title, info_lines)
 
-    # Input field text
-    s = initial_text
+        _term.show_cursor(very_visible=True)
 
-    # Cursor position
-    i = len(initial_text)
+        # Input field text
+        s = initial_text
 
-    def edit_width():
-        return _width(win) - 4
+        # Cursor position
+        i = len(initial_text)
 
-    # Horizontal scroll offset
-    hscroll = max(i - edit_width() + 1, 0)
+        def edit_width():
+            return _width(win) - 4
 
-    bottom_shadow, right_shadow = _create_shadow_for_win(win)
+        # Horizontal scroll offset
+        hscroll = max(i - edit_width() + 1, 0)
 
-    while True:
-        # Draw the "main" display with the menu, etc., so that resizing still
-        # works properly. This is like a stack of windows, only hardcoded for
-        # now.
-        _draw_main()
+        bottom_shadow, right_shadow = _create_shadow_for_win(win)
+        while True:
+            # Draw the "main" display with the menu, etc., so that resizing
+            # still works properly. This is like a stack of windows, only
+            # hardcoded for now.
+            _draw_main()
 
-        _draw_input_dialog(win, title, info_lines, s, i, hscroll)
+            _draw_input_dialog(win, title, info_lines, s, i, hscroll)
 
-        _refresh_shadow_windows(bottom_shadow, right_shadow)
+            _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-        curses.doupdate()
+            _term.update()
 
-        c = _getch_compat(win)
+            c = _term.read_key()
 
-        if c == curses.KEY_RESIZE:
-            _resize_main()
-            _resize_input_dialog(win, title, info_lines)
-            bottom_shadow, right_shadow = _create_shadow_for_win(win)
+            if c == Key.RESIZE:
+                _resize_main()
+                _resize_input_dialog(win, title, info_lines)
+                _close_shadow_windows(bottom_shadow, right_shadow)
+                bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
-        elif c == "\n":
-            _safe_curs_set(0)
-            return s
+            elif c == "\n":
+                _term.hide_cursor()
+                return s
 
-        elif c == "\x1b":  # \x1B = ESC
-            _safe_curs_set(0)
-            return None
+            elif c == "\x1b":  # \x1B = ESC
+                _term.hide_cursor()
+                return None
 
-        elif c == "\0":  # \0 = NUL, ignore
-            pass
+            elif c == "\0":  # \0 = NUL, ignore
+                pass
 
-        else:
-            s, i, hscroll = _edit_text(c, s, i, hscroll, edit_width())
+            else:
+                s, i, hscroll = _edit_text(c, s, i, hscroll, edit_width())
+    finally:
+        _close_shadow_windows(bottom_shadow, right_shadow)
+        if win:
+            win.close()
 
 
 def _resize_input_dialog(win, title, info_lines):
     # Resizes the input dialog to a size appropriate for the terminal size
 
-    screen_height, screen_width = _stdscr.getmaxyx()
+    screen_height, screen_width = _term.height, _term.width
 
     win_height = 5
     if info_lines:
@@ -1952,29 +1784,25 @@ def _resize_input_dialog(win, title, info_lines):
     win_width = min(win_width, screen_width)
 
     win.resize(win_height, win_width)
-    win.mvwin((screen_height - win_height) // 2, (screen_width - win_width) // 2)
+    win.move((screen_height - win_height) // 2, (screen_width - win_width) // 2)
 
 
 def _draw_input_dialog(win, title, info_lines, s, i, hscroll):
     edit_width = _width(win) - 4
 
-    win.erase()
+    win.clear()
 
     # Note: Perhaps having a separate window for the input field would be nicer
     visible_s = s[hscroll : hscroll + edit_width]
-    _safe_addstr(
-        win, 2, 2, visible_s + " " * (edit_width - len(visible_s)), _style["edit"]
-    )
+    win.write(2, 2, visible_s + " " * (edit_width - len(visible_s)), _style["edit"])
 
     for linenr, line in enumerate(info_lines):
-        _safe_addstr(win, 4 + linenr, 2, line)
+        win.write(4 + linenr, 2, line, _style["body"])
 
     # Draw the frame last so that it overwrites the body text for small windows
     _draw_frame(win, title)
 
-    _safe_move(win, 2, 2 + i - hscroll)
-
-    win.noutrefresh()
+    _term.set_cursor(win, 2, 2 + i - hscroll)
 
 
 def _load_dialog():
@@ -2116,42 +1944,49 @@ def _key_dialog(title, text, keys):
     #   converted to lowercase. ESC will always close the dialog, and returns
     #   None.
 
-    win = _styled_win("body")
-    win.keypad(True)
+    win = None
+    bottom_shadow = right_shadow = None
 
-    _resize_key_dialog(win, text)
+    try:
+        win = _styled_region("body")
 
-    bottom_shadow, right_shadow = _create_shadow_for_win(win)
+        _resize_key_dialog(win, text)
 
-    while True:
-        _draw_main()
+        bottom_shadow, right_shadow = _create_shadow_for_win(win)
+        while True:
+            _draw_main()
 
-        _draw_key_dialog(win, title, text)
+            _draw_key_dialog(win, title, text)
 
-        _refresh_shadow_windows(bottom_shadow, right_shadow)
+            _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-        curses.doupdate()
+            _term.update()
 
-        c = _getch_compat(win)
+            c = _term.read_key()
 
-        if c == curses.KEY_RESIZE:
-            _resize_main()
-            _resize_key_dialog(win, text)
-            bottom_shadow, right_shadow = _create_shadow_for_win(win)
+            if c == Key.RESIZE:
+                _resize_main()
+                _resize_key_dialog(win, text)
+                _close_shadow_windows(bottom_shadow, right_shadow)
+                bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
-        elif c == "\x1b":  # \x1B = ESC
-            return None
+            elif c == "\x1b":  # \x1B = ESC
+                return None
 
-        elif isinstance(c, str):
-            c = c.lower()
-            if c in keys:
-                return c
+            elif isinstance(c, str):
+                c = c.lower()
+                if c in keys:
+                    return c
+    finally:
+        _close_shadow_windows(bottom_shadow, right_shadow)
+        if win:
+            win.close()
 
 
 def _resize_key_dialog(win, text):
     # Resizes the key dialog to a size appropriate for the terminal size
 
-    screen_height, screen_width = _stdscr.getmaxyx()
+    screen_height, screen_width = _term.height, _term.width
 
     lines = text.split("\n")
 
@@ -2159,22 +1994,18 @@ def _resize_key_dialog(win, text):
     win_width = min(max(len(line) for line in lines) + 4, screen_width)
 
     win.resize(win_height, win_width)
-    win.mvwin((screen_height - win_height) // 2, (screen_width - win_width) // 2)
+    win.move((screen_height - win_height) // 2, (screen_width - win_width) // 2)
 
 
 def _draw_key_dialog(win, title, text):
-    win.erase()
+    win.clear()
 
     # Draw the frame first
     _draw_frame(win, title)
 
     # Then draw text content inside the frame
-    win.attron(_style["body"])
     for i, line in enumerate(text.split("\n")):
-        _safe_addstr(win, 2 + i, 2, line)
-    win.attroff(_style["body"])
-
-    win.noutrefresh()
+        win.write(2 + i, 2, line, _style["body"])
 
 
 def _button_dialog(title, text, buttons, default_button=0):
@@ -2187,129 +2018,133 @@ def _button_dialog(title, text, buttons, default_button=0):
     #
     # Returns: Index of selected button, or None if ESC pressed
 
-    win = _styled_win("dialog")
-    win.keypad(True)
+    win = None
+    bottom_shadow = right_shadow = None
 
-    selected_button = default_button
+    try:
+        win = _styled_region("dialog")
 
-    # Calculate window size based on content
-    lines = text.split("\n")
-    # Height: border(1) + text lines + blank + separator(1) + buttons + border(1)
-    # = 1 + len(lines) + 1 + 1 + 1 + 1 = len(lines) + 5
-    win_height = min(len(lines) + 5, _height(_stdscr) - 4)
-    # Calculate width from longest line and button row
-    # Button row width includes buttons + spacing between them
-    # 2 buttons: spacing 13, 3+ buttons: spacing 4
-    spacing = 13 if len(buttons) == 2 else 4
-    button_row_width = sum(len(b) + 2 for b in buttons) + spacing * (len(buttons) - 1)
-    win_width = min(
-        max(max(len(line) for line in lines) + 4, button_row_width + 4),
-        _width(_stdscr) - 4,
-    )
+        selected_button = default_button
 
-    win.resize(win_height, win_width)
-    win.mvwin((_height(_stdscr) - win_height) // 2, (_width(_stdscr) - win_width) // 2)
-
-    bottom_shadow, right_shadow = _create_shadow_for_win(win)
-
-    frame_style = _style.get("dialog-frame", _style["dialog"])
-
-    while True:
-        # Draw main display behind dialog (calls noutrefresh on all subwindows)
-        _draw_main()
-
-        win.erase()
-
-        # Draw box border
-        _draw_box(win, 0, 0, win_height, win_width, frame_style, frame_style)
-
-        # Draw title bar if title provided
-        if title:
-            win.attron(frame_style)
-            for i in range(1, win_width - 1):
-                _safe_addch(win, 0, i, ord(" "))
-            _safe_addstr(win, 0, (win_width - len(title)) // 2, title)
-            win.attroff(frame_style)
-
-        # Draw horizontal separator line before buttons (height - 3)
-        win.attron(frame_style)
-        _safe_addch(win, win_height - 3, 0, curses.ACS_LTEE)
-        for i in range(1, win_width - 1):
-            _safe_addch(win, win_height - 3, i, curses.ACS_HLINE)
-        _safe_addch(win, win_height - 3, win_width - 1, curses.ACS_RTEE)
-        win.attroff(frame_style)
-
-        # Draw text content
-        win.attron(frame_style)
-        for i in range(1, win_height - 3):
-            for j in range(1, win_width - 1):
-                _safe_addch(win, i, j, ord(" "))
-        for i, line in enumerate(lines):
-            _safe_addstr(win, 1 + i, 2, line)
-        win.attroff(frame_style)
-
-        # Buttons at row (height - 2)
-        button_y = win_height - 2
-
-        # Fill button row background
-        win.attrset(frame_style)
-        for i in range(1, win_width - 1):
-            _safe_addch(win, button_y, i, ord(" "))
-
-        # Calculate button positions with spacing
-        # 2 buttons: 13 chars spacing (from lxdialog/yesno.c), 3+: spacing 4
-        btn_spacing = 13 if len(buttons) == 2 else 4
-        total_width = sum(len(b) + 2 for b in buttons) + btn_spacing * (
+        # Calculate window size based on content
+        lines = text.split("\n")
+        # Height: border(1) + text lines + blank + separator(1) + buttons +
+        # border(1) = 1 + len(lines) + 1 + 1 + 1 + 1 = len(lines) + 5
+        win_height = min(len(lines) + 5, _term.height - 4)
+        # Calculate width from longest line and button row
+        # Button row width includes buttons + spacing between them
+        # 2 buttons: spacing 13, 3+ buttons: spacing 4
+        spacing = 13 if len(buttons) == 2 else 4
+        button_row_width = sum(len(b) + 2 for b in buttons) + spacing * (
             len(buttons) - 1
         )
-        button_positions = []
-        current_x = (win_width - total_width) // 2
-        for b in buttons:
-            button_positions.append(current_x)
-            current_x += len(b) + 2 + btn_spacing
+        win_width = min(
+            max(max(len(line) for line in lines) + 4, button_row_width + 4),
+            _term.width - 4,
+        )
 
-        # Draw buttons at calculated positions
-        for i, button_label in enumerate(buttons):
-            _print_button(
-                win, button_label, button_y, button_positions[i], i == selected_button
+        win.resize(win_height, win_width)
+        win.move((_term.height - win_height) // 2, (_term.width - win_width) // 2)
+
+        bottom_shadow, right_shadow = _create_shadow_for_win(win)
+
+        frame_style = _style.get("dialog-frame", _style["dialog"])
+        while True:
+            # Draw main display behind dialog
+            _draw_main()
+
+            win.clear()
+
+            # Draw box border
+            _draw_box(win, 0, 0, win_height, win_width, frame_style, frame_style)
+
+            row_fill = " " * (win_width - 2)
+
+            # Draw title bar if title provided
+            if title:
+                win.write(0, 1, row_fill, frame_style)
+                win.write(0, (win_width - len(title)) // 2, title, frame_style)
+
+            # Draw horizontal separator line before buttons (height - 3)
+            win.write_char(win_height - 3, 0, Box.LTEE, frame_style)
+            for i in range(1, win_width - 1):
+                win.write_char(win_height - 3, i, Box.HLINE, frame_style)
+            win.write_char(win_height - 3, win_width - 1, Box.RTEE, frame_style)
+
+            # Draw text content
+            for i in range(1, win_height - 3):
+                win.write(i, 1, row_fill, frame_style)
+            for i, line in enumerate(lines):
+                win.write(1 + i, 2, line, frame_style)
+
+            # Buttons at row (height - 2)
+            button_y = win_height - 2
+
+            # Fill button row background
+            win.write(button_y, 1, row_fill, frame_style)
+
+            # Calculate button positions with spacing
+            # 2 buttons: 13 chars spacing (from lxdialog/yesno.c), 3+: spacing 4
+            btn_spacing = 13 if len(buttons) == 2 else 4
+            total_width = sum(len(b) + 2 for b in buttons) + btn_spacing * (
+                len(buttons) - 1
             )
+            button_positions = []
+            current_x = (win_width - total_width) // 2
+            for b in buttons:
+                button_positions.append(current_x)
+                current_x += len(b) + 2 + btn_spacing
 
-        win.noutrefresh()
-
-        # Refresh shadow windows after dialog window to ensure they're on top
-        _refresh_shadow_windows(bottom_shadow, right_shadow)
-
-        curses.doupdate()
-
-        # Handle input
-        c = _getch_compat(win)
-
-        if c == curses.KEY_RESIZE:
-            _resize_main()
-            win.resize(win_height, win_width)
-            win.mvwin(
-                (_height(_stdscr) - win_height) // 2, (_width(_stdscr) - win_width) // 2
-            )
-            bottom_shadow, right_shadow = _create_shadow_for_win(win)
-
-        elif c == "\x1b":  # ESC
-            return None
-
-        elif c == "\t" or c == curses.KEY_RIGHT:  # TAB or RIGHT arrow
-            selected_button = (selected_button + 1) % len(buttons)
-
-        elif c == curses.KEY_LEFT:  # LEFT arrow
-            selected_button = (selected_button - 1) % len(buttons)
-
-        elif c == " " or c == "\n":  # SPACE or ENTER
-            return selected_button
-
-        elif isinstance(c, str):
-            # Check for hotkey match
-            c_lower = c.lower()
+            # Draw buttons at calculated positions
             for i, button_label in enumerate(buttons):
-                if button_label.strip().lower().startswith(c_lower):
-                    return i
+                _print_button(
+                    win,
+                    button_label,
+                    button_y,
+                    button_positions[i],
+                    i == selected_button,
+                )
+
+            # Refresh shadow windows after dialog window to ensure they're on top
+            _refresh_shadow_windows(bottom_shadow, right_shadow)
+
+            _term.update()
+
+            # Handle input
+            c = _term.read_key()
+
+            if c == Key.RESIZE:
+                _resize_main()
+                win.resize(win_height, win_width)
+                win.move(
+                    (_term.height - win_height) // 2,
+                    (_term.width - win_width) // 2,
+                )
+                _close_shadow_windows(bottom_shadow, right_shadow)
+                bottom_shadow, right_shadow = _create_shadow_for_win(win)
+
+            elif c == "\x1b":  # ESC
+                return None
+
+            elif c == "\t" or c == Key.RIGHT:  # TAB or RIGHT arrow
+                selected_button = (selected_button + 1) % len(buttons)
+
+            elif c == Key.LEFT:  # LEFT arrow
+                selected_button = (selected_button - 1) % len(buttons)
+
+            elif c == " " or c == "\n":  # SPACE or ENTER
+                return selected_button
+
+            elif isinstance(c, str):
+                # Check for hotkey match
+                c_lower = c.lower()
+                for i, button_label in enumerate(buttons):
+                    if button_label.strip().lower().startswith(c_lower):
+                        return i
+    finally:
+        _close_shadow_windows(bottom_shadow, right_shadow)
+        if win:
+            win.close()
 
 
 def _print_button(win, label, y, x, selected):
@@ -2329,67 +2164,51 @@ def _print_button(win, label, y, x, selected):
     key_style = _style["button-key-" + sfx]
     lbl_style = _style["button-label-" + sfx]
 
-    # Move to position
-    _safe_move(win, y, x)
-
     # Draw bracket "<"
-    win.attrset(btn_style)
-    _safe_addstr(win, y, x, "<")
+    win.write(y, x, "<", btn_style)
 
     # Draw leading spaces with label style
-    win.attrset(lbl_style)
-    for _ in range(leading_spaces):
-        _safe_addch(win, y, x + 1 + _, ord(" "))
+    if leading_spaces:
+        win.write(y, x + 1, " " * leading_spaces, lbl_style)
 
     # Draw first character (hotkey) with key style, then rest with label style
     if label_stripped:
-        win.attrset(key_style)
-        _safe_addch(win, y, x + 1 + leading_spaces, ord(label_stripped[0]))
-
-        win.attrset(lbl_style)
-        _safe_addstr(win, y, x + 1 + leading_spaces + 1, label_stripped[1:])
+        win.write_char(y, x + 1 + leading_spaces, label_stripped[0], key_style)
+        win.write(y, x + 1 + leading_spaces + 1, label_stripped[1:], lbl_style)
 
     # Draw bracket ">"
-    win.attrset(btn_style)
-    _safe_addstr(win, y, x + 1 + len(label), ">")
-
-    # Move cursor to the hotkey position for selected button
-    _safe_move(win, y, x + 1 + leading_spaces)
+    win.write(y, x + 1 + len(label), ">", btn_style)
 
 
-def _draw_box(win, y, x, height, width, box_attr, border_attr):
-    # Draw a rectangular box with line drawing characters, matching lxdialog's draw_box()
+def _draw_box(win, y, x, height, width, box_style, border_style):
+    # Draw a rectangular box with line drawing characters, matching lxdialog's
+    # draw_box().  Fills the interior with box_style, matching the C version
+    # which writes (box | ' ') for every interior cell.
     #
-    # box_attr: attribute for box body and right/bottom borders
-    # border_attr: attribute for left/top borders
+    # box_style: style for interior, right/bottom borders
+    # border_style: style for left/top borders
 
     last_row = y + height - 1
     last_col = x + width - 1
 
-    # Top border (left/top attr)
-    win.attrset(border_attr)
-    _safe_addch(win, y, x, curses.ACS_ULCORNER)
+    # Top border (border_style for left/top edge)
+    win.write_char(y, x, Box.ULCORNER, border_style)
     for j in range(x + 1, last_col):
-        _safe_addch(win, y, j, curses.ACS_HLINE)
+        win.write_char(y, j, Box.HLINE, border_style)
+    win.write_char(y, last_col, Box.URCORNER, box_style)
 
-    # Top-right corner (right/bottom attr)
-    win.attrset(box_attr)
-    _safe_addch(win, y, last_col, curses.ACS_URCORNER)
-
-    # Side borders
+    # Interior rows: left border + fill + right border
+    fill = " " * (width - 2)
     for i in range(y + 1, last_row):
-        win.attrset(border_attr)
-        _safe_addch(win, i, x, curses.ACS_VLINE)
-        win.attrset(box_attr)
-        _safe_addch(win, i, last_col, curses.ACS_VLINE)
+        win.write_char(i, x, Box.VLINE, border_style)
+        win.write(i, x + 1, fill, box_style)
+        win.write_char(i, last_col, Box.VLINE, box_style)
 
-    # Bottom border
-    win.attrset(border_attr)
-    _safe_addch(win, last_row, x, curses.ACS_LLCORNER)
-    win.attrset(box_attr)
+    # Bottom border (box_style for right/bottom edge)
+    win.write_char(last_row, x, Box.LLCORNER, border_style)
     for j in range(x + 1, last_col):
-        _safe_addch(win, last_row, j, curses.ACS_HLINE)
-    _safe_addch(win, last_row, last_col, curses.ACS_LRCORNER)
+        win.write_char(last_row, j, Box.HLINE, box_style)
+    win.write_char(last_row, last_col, Box.LRCORNER, box_style)
 
 
 def _draw_scrollbar(
@@ -2418,97 +2237,100 @@ def _draw_scrollbar(
     for i in range(height):
         y = y_start + i
         if i == 0:
-            _safe_addch(win, y, x, curses.ACS_UARROW, track_style)
+            win.write_char(y, x, Box.UARROW, track_style)
         elif i == height - 1:
-            _safe_addch(win, y, x, curses.ACS_DARROW, track_style)
+            win.write_char(y, x, Box.DARROW, track_style)
         elif i == thumb_pos:
-            _safe_addch(win, y, x, ord(" "), thumb_style)
+            win.write_char(y, x, " ", thumb_style)
         else:
-            _safe_addch(win, y, x, curses.ACS_VLINE, track_style)
+            win.write_char(y, x, Box.VLINE, track_style)
 
 
 def _create_shadow_for_win(win, right_y_offset=1):
-    # Convenience wrapper: creates shadow windows from a curses window's
+    # Convenience wrapper: creates shadow regions from a rawterm Region's
     # position and size
-    y, x = win.getbegyx()
-    h, w = win.getmaxyx()
-    return _create_shadow_windows(y, x, h, w, right_y_offset)
+    return _create_shadow_windows(win.y, win.x, win.height, win.width, right_y_offset)
 
 
 def _create_shadow_windows(y, x, height, width, right_y_offset=1):
-    # Create shadow windows for bottom and right edges
-    # Returns tuple of (bottom_shadow_win, right_shadow_win)
+    # Create shadow regions for bottom and right edges
+    # Returns tuple of (bottom_shadow, right_shadow)
     #
     # Based on lxdialog's draw_shadow():
     # - Bottom: at y + height, from x + 2, width chars
     # - Right: from y + right_y_offset to y + height (inclusive), at x + width, 2 chars wide
 
-    if not curses.has_colors():
-        return None, None
-
     try:
-        shadow_attr = _style.get("shadow", 0)
+        shadow_style = _style.get("shadow", Style())
 
-        # Bottom shadow window (1 line high, width wide, offset by 2 on x)
+        # Bottom shadow region (1 line high, width wide, offset by 2 on x)
         bottom_shadow = None
-        if y + height < _height(_stdscr) and x + 2 + width <= _width(_stdscr):
+        if y + height < _term.height and x + 2 + width <= _term.width:
             try:
-                bottom_shadow = curses.newwin(1, width, y + height, x + 2)
-                bottom_shadow.bkgd(" ", shadow_attr)
-            except:
+                bottom_shadow = _term.region(1, width, y + height, x + 2)
+                bottom_shadow.fill(shadow_style)
+            except Exception:
                 pass
 
-        # Right shadow window
-        # lxdialog: for (i = y + 1; i < y + height + 1; i++)
-        # Draw from y+right_y_offset to y+height (inclusive)
+        # Right shadow region
         right_shadow = None
-        if x + width + 2 <= _width(_stdscr) and y + height <= _height(_stdscr):
+        if x + width + 2 <= _term.width and y + height <= _term.height:
             try:
-                # From (y + right_y_offset) to (y + height) inclusive
-                # Total rows = (y + height) - (y + right_y_offset) + 1 = height - right_y_offset + 1
                 shadow_height = height - right_y_offset + 1
                 if shadow_height > 0:
-                    right_shadow = curses.newwin(
+                    right_shadow = _term.region(
                         shadow_height, 2, y + right_y_offset, x + width
                     )
-                    right_shadow.bkgd(" ", shadow_attr)
-            except:
+                    right_shadow.fill(shadow_style)
+            except Exception:
                 pass
 
         return bottom_shadow, right_shadow
-    except:
+    except Exception:
         return None, None
 
 
-def _refresh_shadow_windows(bottom_shadow, right_shadow):
-    # Refresh shadow windows, refilling them each time to ensure visibility
+def _close_shadow_windows(bottom_shadow, right_shadow):
+    # Unregister shadow regions from the compositor so they stop rendering.
     if bottom_shadow:
         try:
-            bottom_shadow.erase()  # Clear and refill with background
-            bottom_shadow.noutrefresh()
-        except:
+            bottom_shadow.close()
+        except Exception:
             pass
     if right_shadow:
         try:
-            right_shadow.erase()  # Clear and refill with background
-            right_shadow.noutrefresh()
-        except:
+            right_shadow.close()
+        except Exception:
+            pass
+
+
+def _refresh_shadow_windows(bottom_shadow, right_shadow):
+    # Shadow regions are composited automatically by _term.update().
+    # Just clear and refill them to ensure correct content.
+    if bottom_shadow:
+        try:
+            bottom_shadow.clear()
+        except Exception:
+            pass
+    if right_shadow:
+        try:
+            right_shadow.clear()
+        except Exception:
             pass
 
 
 def _draw_frame(win, title):
     # Draw a frame around the inner edges of 'win', with 'title' at the top
-    # Now uses _draw_box() for proper box drawing characters
+    # Uses _draw_box() for proper box drawing characters
 
-    win_height, win_width = win.getmaxyx()
+    win_height = win.height
+    win_width = win.width
 
     # Draw box with frame style for both border and box
     _draw_box(win, 0, 0, win_height, win_width, _style["frame"], _style["frame"])
 
     # Draw title
-    win.attron(_style["frame"])
-    _safe_addstr(win, 0, max((win_width - len(title)) // 2, 0), title)
-    win.attroff(_style["frame"])
+    win.write(0, max((win_width - len(title)) // 2, 0), title, _style["frame"])
 
 
 def _jump_to_dialog():
@@ -2518,222 +2340,232 @@ def _jump_to_dialog():
     # Returns True if the user jumped to a symbol, and False if the dialog was
     # canceled.
 
-    s = ""  # Search text
-    prev_s = None  # Previous search text
-    s_i = 0  # Search text cursor position
-    hscroll = 0  # Horizontal scroll offset
+    edit_box = matches_win = bot_sep_win = help_win = None
+    bottom_shadow = right_shadow = None
 
-    sel_node_i = 0  # Index of selected row
-    scroll = 0  # Index in 'matches' of the top row of the list
+    try:
+        s = ""  # Search text
+        prev_s = None  # Previous search text
+        s_i = 0  # Search text cursor position
+        hscroll = 0  # Horizontal scroll offset
 
-    # Edit box at the top
-    edit_box = _styled_win("jump-edit")
-    edit_box.keypad(True)
+        sel_node_i = 0  # Index of selected row
+        scroll = 0  # Index in 'matches' of the top row of the list
 
-    # List of matches
-    matches_win = _styled_win("list")
+        # Edit box at the top
+        edit_box = _styled_region("jump-edit")
 
-    # Bottom separator, with arrows pointing down
-    bot_sep_win = _styled_win("separator")
+        # List of matches
+        matches_win = _styled_region("list")
 
-    # Help window with instructions at the bottom
-    help_win = _styled_win("help")
+        # Bottom separator, with arrows pointing down
+        bot_sep_win = _styled_region("separator")
 
-    # Give windows their initial size
-    _resize_jump_to_dialog(
-        edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
-    )
+        # Help window with instructions at the bottom
+        help_win = _styled_region("help")
 
-    def _jump_to_shadows():
-        # Shadow windows cover the dialog area (everything except help window)
-        sh, sw = _stdscr.getmaxyx()
-        dh = sh - len(_JUMP_TO_HELP_LINES) - 1
-        return _create_shadow_windows(0, 0, dh, sw, right_y_offset=1)
-
-    bottom_shadow, right_shadow = _jump_to_shadows()
-
-    _safe_curs_set(2)
-
-    # Logic duplication with _select_{next,prev}_menu_entry(), except we do a
-    # functional variant that returns the new (sel_node_i, scroll) values to
-    # avoid 'nonlocal'. TODO: Can this be factored out in some nice way?
-
-    def select_next_match():
-        if sel_node_i == len(matches) - 1:
-            return sel_node_i, scroll
-
-        if sel_node_i + 1 >= scroll + _height(
-            matches_win
-        ) - _SCROLL_OFFSET and scroll < _max_scroll(matches, matches_win):
-
-            return sel_node_i + 1, scroll + 1
-
-        return sel_node_i + 1, scroll
-
-    def select_prev_match():
-        if sel_node_i == 0:
-            return sel_node_i, scroll
-
-        if sel_node_i - 1 < scroll + _SCROLL_OFFSET:
-            return sel_node_i - 1, max(scroll - 1, 0)
-
-        return sel_node_i - 1, scroll
-
-    while True:
-        if s != prev_s:
-            # The search text changed. Find new matching nodes.
-
-            prev_s = s
-
-            try:
-                # We could use re.IGNORECASE here instead of lower(), but this
-                # is noticeably less jerky while inputting regexes like
-                # '.*debug$' (though the '.*' is redundant there). Those
-                # probably have bad interactions with re.search(), which
-                # matches anywhere in the string.
-                #
-                # It's not horrible either way. Just a bit smoother.
-                regex_searches = [
-                    re.compile(regex).search for regex in s.lower().split()
-                ]
-
-                # No exception thrown, so the regexes are okay
-                bad_re = None
-
-                # List of matching nodes
-                matches = []
-                add_match = matches.append
-
-                # Search symbols and choices
-
-                for node in _sorted_sc_nodes():
-                    # Symbol/choice
-                    sc = node.item
-
-                    for search in regex_searches:
-                        # Both the name and the prompt might be missing, since
-                        # we're searching both symbols and choices
-
-                        # Does the regex match either the symbol name or the
-                        # prompt (if any)?
-                        if not (
-                            sc.name
-                            and search(sc.name.lower())
-                            or node.prompt
-                            and search(node.prompt[0].lower())
-                        ):
-
-                            # Give up on the first regex that doesn't match, to
-                            # speed things up a bit when multiple regexes are
-                            # entered
-                            break
-
-                    else:
-                        add_match(node)
-
-                # Search menus and comments
-
-                for node in _sorted_menu_comment_nodes():
-                    for search in regex_searches:
-                        if not search(node.prompt[0].lower()):
-                            break
-                    else:
-                        add_match(node)
-
-            except re.error as e:
-                # Bad regex. Remember the error message so we can show it.
-                bad_re = "Bad regular expression"
-                # re.error.msg was added in Python 3.5
-                if hasattr(e, "msg"):
-                    bad_re += ": " + e.msg
-
-                matches = []
-
-            # Reset scroll and jump to the top of the list of matches
-            sel_node_i = scroll = 0
-
-        _draw_jump_to_dialog(
-            edit_box,
-            matches_win,
-            bot_sep_win,
-            help_win,
-            s,
-            s_i,
-            hscroll,
-            bad_re,
-            matches,
-            sel_node_i,
-            scroll,
+        # Give windows their initial size
+        _resize_jump_to_dialog(
+            edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
         )
 
-        # Refresh shadow windows after all other windows
-        _refresh_shadow_windows(bottom_shadow, right_shadow)
+        def _jump_to_shadows():
+            # Shadow windows cover the dialog area (everything except help win)
+            _close_shadow_windows(bottom_shadow, right_shadow)
+            sh, sw = _term.height, _term.width
+            dh = sh - len(_JUMP_TO_HELP_LINES) - 1
+            return _create_shadow_windows(0, 0, dh, sw, right_y_offset=1)
 
-        curses.doupdate()
+        bottom_shadow, right_shadow = _jump_to_shadows()
 
-        c = _getch_compat(edit_box)
+        _term.show_cursor(very_visible=True)
 
-        if c == "\n":
-            if matches:
-                _jump_to(matches[sel_node_i])
-                _safe_curs_set(0)
-                return True
+        # Logic duplication with _select_{next,prev}_menu_entry(), except we
+        # do a functional variant that returns the new (sel_node_i, scroll)
+        # values to avoid 'nonlocal'. TODO: Can this be factored out in some
+        # nice way?
 
-        elif c == "\x1b":  # \x1B = ESC
-            _safe_curs_set(0)
-            return False
+        def select_next_match():
+            if sel_node_i == len(matches) - 1:
+                return sel_node_i, scroll
 
-        elif c == curses.KEY_RESIZE:
-            # We adjust the scroll so that the selected node stays visible in
-            # the list when the terminal is resized, hence the 'scroll'
-            # assignment
-            scroll = _resize_jump_to_dialog(
-                edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
+            if sel_node_i + 1 >= scroll + _height(
+                matches_win
+            ) - _SCROLL_OFFSET and scroll < _max_scroll(matches, matches_win):
+
+                return sel_node_i + 1, scroll + 1
+
+            return sel_node_i + 1, scroll
+
+        def select_prev_match():
+            if sel_node_i == 0:
+                return sel_node_i, scroll
+
+            if sel_node_i - 1 < scroll + _SCROLL_OFFSET:
+                return sel_node_i - 1, max(scroll - 1, 0)
+
+            return sel_node_i - 1, scroll
+
+        while True:
+            if s != prev_s:
+                # The search text changed. Find new matching nodes.
+
+                prev_s = s
+
+                try:
+                    # We could use re.IGNORECASE here instead of lower(), but
+                    # this is noticeably less jerky while inputting regexes like
+                    # '.*debug$' (though the '.*' is redundant there). Those
+                    # probably have bad interactions with re.search(), which
+                    # matches anywhere in the string.
+                    #
+                    # It's not horrible either way. Just a bit smoother.
+                    regex_searches = [
+                        re.compile(regex).search for regex in s.lower().split()
+                    ]
+
+                    # No exception thrown, so the regexes are okay
+                    bad_re = None
+
+                    # List of matching nodes
+                    matches = []
+                    add_match = matches.append
+
+                    # Search symbols and choices
+
+                    for node in _sorted_sc_nodes():
+                        # Symbol/choice
+                        sc = node.item
+
+                        for search in regex_searches:
+                            # Both the name and the prompt might be missing,
+                            # since we're searching both symbols and choices
+
+                            # Does the regex match either the symbol name or
+                            # the prompt (if any)?
+                            if not (
+                                sc.name
+                                and search(sc.name.lower())
+                                or node.prompt
+                                and search(node.prompt[0].lower())
+                            ):
+
+                                # Give up on the first regex that doesn't
+                                # match, to speed things up a bit when multiple
+                                # regexes are entered
+                                break
+
+                        else:
+                            add_match(node)
+
+                    # Search menus and comments
+
+                    for node in _sorted_menu_comment_nodes():
+                        for search in regex_searches:
+                            if not search(node.prompt[0].lower()):
+                                break
+                        else:
+                            add_match(node)
+
+                except re.error as e:
+                    # Bad regex. Remember the error message so we can show it.
+                    bad_re = "Bad regular expression"
+                    # re.error.msg was added in Python 3.5
+                    if hasattr(e, "msg"):
+                        bad_re += ": " + e.msg
+
+                    matches = []
+
+                # Reset scroll and jump to the top of the list of matches
+                sel_node_i = scroll = 0
+
+            _draw_jump_to_dialog(
+                edit_box,
+                matches_win,
+                bot_sep_win,
+                help_win,
+                s,
+                s_i,
+                hscroll,
+                bad_re,
+                matches,
+                sel_node_i,
+                scroll,
             )
 
-            bottom_shadow, right_shadow = _jump_to_shadows()
+            # Refresh shadow windows after all other windows
+            _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-        elif c == "\x06":  # \x06 = Ctrl-F
-            if matches:
-                _safe_curs_set(0)
-                _info_dialog(matches[sel_node_i], True)
-                _safe_curs_set(2)
+            _term.update()
 
+            c = _term.read_key()
+
+            if c == "\n":
+                if matches:
+                    _jump_to(matches[sel_node_i])
+                    _term.hide_cursor()
+                    return True
+
+            elif c == "\x1b":  # \x1B = ESC
+                _term.hide_cursor()
+                return False
+
+            elif c == Key.RESIZE:
+                # We adjust the scroll so that the selected node stays visible
+                # in the list when the terminal is resized, hence the 'scroll'
+                # assignment
                 scroll = _resize_jump_to_dialog(
                     edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
                 )
 
                 bottom_shadow, right_shadow = _jump_to_shadows()
 
-        elif c == curses.KEY_DOWN:
-            sel_node_i, scroll = select_next_match()
+            elif c == "\x06":  # \x06 = Ctrl-F
+                if matches:
+                    _term.hide_cursor()
+                    _info_dialog(matches[sel_node_i], True)
+                    _term.show_cursor(very_visible=True)
 
-        elif c == curses.KEY_UP:
-            sel_node_i, scroll = select_prev_match()
+                    scroll = _resize_jump_to_dialog(
+                        edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
+                    )
 
-        elif c in (curses.KEY_NPAGE, "\x04"):  # Page Down/Ctrl-D
-            # Keep it simple. This way we get sane behavior for small windows,
-            # etc., for free.
-            for _ in range(_PG_JUMP):
+                    bottom_shadow, right_shadow = _jump_to_shadows()
+
+            elif c == Key.DOWN:
                 sel_node_i, scroll = select_next_match()
 
-        # Page Up (no Ctrl-U, as it's already used by the edit box)
-        elif c == curses.KEY_PPAGE:
-            for _ in range(_PG_JUMP):
+            elif c == Key.UP:
                 sel_node_i, scroll = select_prev_match()
 
-        elif c == curses.KEY_END:
-            sel_node_i = len(matches) - 1
-            scroll = _max_scroll(matches, matches_win)
+            elif c in (Key.PAGE_DOWN, "\x04"):  # Page Down/Ctrl-D
+                # Keep it simple. This way we get sane behavior for small
+                # windows, etc., for free.
+                for _ in range(_PG_JUMP):
+                    sel_node_i, scroll = select_next_match()
 
-        elif c == curses.KEY_HOME:
-            sel_node_i = scroll = 0
+            # Page Up (no Ctrl-U, as it's already used by the edit box)
+            elif c == Key.PAGE_UP:
+                for _ in range(_PG_JUMP):
+                    sel_node_i, scroll = select_prev_match()
 
-        elif c == "\0":  # \0 = NUL, ignore
-            pass
+            elif c == Key.END:
+                sel_node_i = len(matches) - 1
+                scroll = _max_scroll(matches, matches_win)
 
-        else:
-            s, s_i, hscroll = _edit_text(c, s, s_i, hscroll, _width(edit_box) - 2)
+            elif c == Key.HOME:
+                sel_node_i = scroll = 0
+
+            elif c == "\0":  # \0 = NUL, ignore
+                pass
+
+            else:
+                s, s_i, hscroll = _edit_text(c, s, s_i, hscroll, _width(edit_box) - 2)
+    finally:
+        _close_shadow_windows(bottom_shadow, right_shadow)
+        for r in (edit_box, matches_win, bot_sep_win, help_win):
+            if r:
+                r.close()
 
 
 # Obscure Python: We never pass a value for cached_nodes, and it keeps pointing
@@ -2784,7 +2616,7 @@ def _resize_jump_to_dialog(
     # Returns the new scroll index. We adjust the scroll if needed so that the
     # selected node stays visible.
 
-    screen_height, screen_width = _stdscr.getmaxyx()
+    screen_height, screen_width = _term.height, _term.width
 
     bot_sep_win.resize(1, screen_width)
 
@@ -2796,9 +2628,9 @@ def _resize_jump_to_dialog(
         matches_win.resize(matches_win_height, screen_width)
         help_win.resize(help_win_height, screen_width)
 
-        matches_win.mvwin(3, 0)
-        bot_sep_win.mvwin(3 + matches_win_height, 0)
-        help_win.mvwin(3 + matches_win_height + 1, 0)
+        matches_win.move(3, 0)
+        bot_sep_win.move(3 + matches_win_height, 0)
+        help_win.move(3 + matches_win_height + 1, 0)
     else:
         # Degenerate case. Give up on nice rendering and just prevent errors.
 
@@ -2809,7 +2641,7 @@ def _resize_jump_to_dialog(
         help_win.resize(1, screen_width)
 
         for win in matches_win, bot_sep_win, help_win:
-            win.mvwin(0, 0)
+            win.move(0, 0)
 
     # Adjust the scroll so that the selected row is still within the window, if
     # needed
@@ -2838,10 +2670,11 @@ def _draw_jump_to_dialog(
     # Update list of matches
     #
 
-    matches_win.erase()
+    matches_win.clear()
 
     # Draw box border around matches window
-    matches_win_height, matches_win_width = matches_win.getmaxyx()
+    matches_win_height = matches_win.height
+    matches_win_width = matches_win.width
     _draw_box(
         matches_win,
         0,
@@ -2877,11 +2710,10 @@ def _draw_jump_to_dialog(
             else:  # node.item == COMMENT
                 node_str = 'comment "{}"'.format(node.prompt[0])
 
-            # Truncate text if needed
-            node_str = node_str[:text_display_width]
+            # Truncate and pad text to fill full row width
+            node_str = node_str[:text_display_width].ljust(text_display_width)
 
-            _safe_addstr(
-                matches_win,
+            matches_win.write(
                 1 + i - scroll,  # Offset by 1 for top border
                 1,  # Offset by 1 for left border
                 node_str,
@@ -2902,45 +2734,36 @@ def _draw_jump_to_dialog(
             )
 
     else:
-        # bad_re holds the error message from the re.error exception on errors
-        _safe_addstr(matches_win, 1, 1, bad_re or "No matches")  # Inside border
-
-    matches_win.noutrefresh()
+        matches_win.write(1, 1, bad_re or "No matches", _style["list"])
 
     #
     # Update bottom separator line
     #
 
-    bot_sep_win.erase()
-
-    bot_sep_win.noutrefresh()
+    bot_sep_win.clear()
 
     #
     # Update help window at bottom
     #
 
-    help_win.erase()
+    help_win.clear()
 
     for i, line in enumerate(_JUMP_TO_HELP_LINES):
-        _safe_addstr(help_win, i, 0, line)
-
-    help_win.noutrefresh()
+        help_win.write(i, 0, line, _style["help"])
 
     #
     # Update edit box. We do this last since it makes it handy to position the
     # cursor.
     #
 
-    edit_box.erase()
+    edit_box.clear()
 
     _draw_frame(edit_box, "Jump to symbol/choice/menu/comment")
 
     visible_s = s[hscroll : hscroll + edit_width]
-    _safe_addstr(edit_box, 1, 1, visible_s)
+    edit_box.write(1, 1, visible_s, _style["jump-edit"])
 
-    _safe_move(edit_box, 1, 1 + s_i - hscroll)
-
-    edit_box.noutrefresh()
+    _term.set_cursor(edit_box, 1, 1 + s_i - hscroll)
 
 
 def _info_dialog(node, from_jump_to_dialog):
@@ -2951,86 +2774,93 @@ def _info_dialog(node, from_jump_to_dialog):
     # information dialog just return, to avoid a confusing recursive invocation
     # of the jump-to-dialog.
 
-    win = _styled_win("body")
-    win.keypad(True)
+    win = None
+    bottom_shadow = right_shadow = None
 
-    # Get lines of help text in mconf format
-    lines = _info_str_mconf(node).split("\n")
+    try:
+        win = _styled_region("body")
 
-    # Index of first row in 'lines' to show
-    scroll = 0
+        # Get lines of help text in mconf format
+        lines = _info_str_mconf(node).split("\n")
 
-    # Give window its initial size
-    _resize_info_dialog(win, node, lines)
+        # Index of first row in 'lines' to show
+        scroll = 0
 
-    bottom_shadow, right_shadow = _create_shadow_for_win(win)
+        # Give window its initial size
+        _resize_info_dialog(win, node, lines)
 
-    while True:
-        _draw_main()
+        bottom_shadow, right_shadow = _create_shadow_for_win(win)
+        while True:
+            _draw_main()
 
-        _draw_info_dialog(win, node, lines, scroll)
+            _draw_info_dialog(win, node, lines, scroll)
 
-        _refresh_shadow_windows(bottom_shadow, right_shadow)
+            _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-        curses.doupdate()
+            _term.update()
 
-        c = _getch_compat(win)
+            c = _term.read_key()
 
-        if c == curses.KEY_RESIZE:
-            _resize_main()
-            _resize_info_dialog(win, node, lines)
-            bottom_shadow, right_shadow = _create_shadow_for_win(win)
+            if c == Key.RESIZE:
+                _resize_main()
+                _resize_info_dialog(win, node, lines)
+                _close_shadow_windows(bottom_shadow, right_shadow)
+                bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
-        elif c in (curses.KEY_DOWN, "j", "J"):
-            if scroll < _max_scroll_info(lines, win):
-                scroll += 1
+            elif c in (Key.DOWN, "j", "J"):
+                if scroll < _max_scroll_info(lines, win):
+                    scroll += 1
 
-        elif c in (curses.KEY_NPAGE, "\x04"):  # Page Down/Ctrl-D
-            scroll = min(scroll + _PG_JUMP, _max_scroll_info(lines, win))
+            elif c in (Key.PAGE_DOWN, "\x04"):  # Page Down/Ctrl-D
+                scroll = min(scroll + _PG_JUMP, _max_scroll_info(lines, win))
 
-        elif c in (curses.KEY_PPAGE, "\x15"):  # Page Up/Ctrl-U
-            scroll = max(scroll - _PG_JUMP, 0)
+            elif c in (Key.PAGE_UP, "\x15"):  # Page Up/Ctrl-U
+                scroll = max(scroll - _PG_JUMP, 0)
 
-        elif c in (curses.KEY_END, "G"):
-            scroll = _max_scroll_info(lines, win)
+            elif c in (Key.END, "G"):
+                scroll = _max_scroll_info(lines, win)
 
-        elif c in (curses.KEY_HOME, "g"):
-            scroll = 0
+            elif c in (Key.HOME, "g"):
+                scroll = 0
 
-        elif c in (curses.KEY_UP, "k", "K"):
-            if scroll > 0:
-                scroll -= 1
+            elif c in (Key.UP, "k", "K"):
+                if scroll > 0:
+                    scroll -= 1
 
-        elif c == "/":
-            # Support starting a search from within the information dialog
+            elif c == "/":
+                # Support starting a search from within the information dialog
 
-            if from_jump_to_dialog:
-                return  # Avoid recursion
+                if from_jump_to_dialog:
+                    return  # Avoid recursion
 
-            if _jump_to_dialog():
-                return  # Jumped to a symbol. Cancel the information dialog.
+                if _jump_to_dialog():
+                    return  # Jumped to a symbol. Cancel the info dialog.
 
-            # Stay in the information dialog if the jump-to dialog was
-            # canceled. Resize it in case the terminal was resized while the
-            # fullscreen jump-to dialog was open.
-            _resize_main()
-            _resize_info_dialog(win, node, lines)
-            bottom_shadow, right_shadow = _create_shadow_for_win(win)
+                # Stay in the information dialog if the jump-to dialog was
+                # canceled. Resize it in case the terminal was resized while
+                # the fullscreen jump-to dialog was open.
+                _resize_main()
+                _resize_info_dialog(win, node, lines)
+                _close_shadow_windows(bottom_shadow, right_shadow)
+                bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
-        elif c in (
-            curses.KEY_LEFT,
-            curses.KEY_BACKSPACE,
-            _ERASE_CHAR,
-            "\x1b",  # \x1B = ESC
-            "\n",  # Enter
-            " ",  # Space
-            "q",
-            "Q",
-            "h",
-            "H",
-        ):
+            elif c in (
+                Key.LEFT,
+                Key.BACKSPACE,
+                "\x1b",  # \x1B = ESC
+                "\n",  # Enter
+                " ",  # Space
+                "q",
+                "Q",
+                "h",
+                "H",
+            ):
 
-            return
+                return
+    finally:
+        _close_shadow_windows(bottom_shadow, right_shadow)
+        if win:
+            win.close()
 
 
 def _info_dialog_title(node):
@@ -3046,102 +2876,82 @@ def _info_dialog_title(node):
 
 
 def _resize_info_dialog(win, node, lines):
-    # Resizes the info dialog to appropriate size
+    # Resizes the info dialog to match mconf's dialog_textbox() -- nearly
+    # full-screen: height = screen_height - 4, width = screen_width - 5,
+    # centered on the terminal.
 
-    screen_height, screen_width = _stdscr.getmaxyx()
+    screen_height, screen_width = _term.height, _term.width
 
-    title = _info_dialog_title(node)
+    # Match dialog_textbox() sizing
+    dlg_height = screen_height - 4
+    dlg_width = screen_width - 5
 
-    # Calculate window dimensions
-    # Height: border(1) + text lines + blank + separator(1) + button + border(1)
-    max_text_lines = min(len(lines), screen_height - 10)
-    win_height = min(max_text_lines + 5, screen_height - 4)
+    # Clamp to minimums (TEXTBOX_HEIGHT_MIN=8, TEXTBOX_WIDTH_MIN=8)
+    if dlg_height < 8:
+        dlg_height = min(8, screen_height)
+    if dlg_width < 8:
+        dlg_width = min(8, screen_width)
 
-    # Width from longest line
-    max_line_len = max(len(line) for line in lines) if lines else 40
-    win_width = min(max(max_line_len + 4, len(title) + 4, 30), screen_width - 4)
-
-    win.resize(win_height, win_width)
-    win.mvwin((screen_height - win_height) // 2, (screen_width - win_width) // 2)
+    win.resize(dlg_height, dlg_width)
+    win.move((screen_height - dlg_height) // 2, (screen_width - dlg_width) // 2)
 
 
 def _draw_info_dialog(win, node, lines, scroll):
-    # Draws the info dialog matching mconf style
+    # Draws the info dialog matching mconf's dialog_textbox() layout:
+    #   Row 0:           top border with title
+    #   Rows 1..h-4:     text content (boxh = height - 4)
+    #   Row h-3:         separator (LTEE + HLINE + RTEE) with scroll %
+    #   Row h-2:         Exit button
+    #   Row h-1:         bottom border
 
-    win_height, win_width = win.getmaxyx()
+    win_height = win.height
+    win_width = win.width
 
     title = _info_dialog_title(node)
 
-    frame_style = _style.get("dialog-frame", _style["frame"])
+    body_style = _style["body"]
+    border_style = _style.get("border", _style["frame"])
+    title_style = _style.get("title", border_style)
 
-    win.erase()
+    win.clear()
 
-    # Draw box border with frame style
-    _draw_box(win, 0, 0, win_height, win_width, frame_style, frame_style)
+    # Outer box -- same styles as the main dialog
+    _draw_box(win, 0, 0, win_height, win_width, body_style, border_style)
 
-    # Draw title bar
+    # Title centered in top border
     if title:
-        win.attron(frame_style)
-        for i in range(1, win_width - 1):
-            _safe_addch(win, 0, i, ord(" "))
-        _safe_addstr(win, 0, (win_width - len(title)) // 2, title)
-        win.attroff(frame_style)
+        tlen = min(win_width - 2, len(title))
+        title_x = (win_width - tlen) // 2
+        win.write_char(0, title_x - 1, " ", title_style)
+        win.write(0, title_x, title[:tlen], title_style)
+        win.write_char(0, title_x + tlen, " ", title_style)
 
-    # Draw horizontal separator line before buttons (height - 3)
-    win.attron(frame_style)
-    _safe_addch(win, win_height - 3, 0, curses.ACS_LTEE)
-    for i in range(1, win_width - 1):
-        _safe_addch(win, win_height - 3, i, curses.ACS_HLINE)
-    _safe_addch(win, win_height - 3, win_width - 1, curses.ACS_RTEE)
-    win.attroff(frame_style)
+    # Separator line at height - 3
+    win.write_char(win_height - 3, 0, Box.LTEE, border_style)
+    for j in range(1, win_width - 1):
+        win.write_char(win_height - 3, j, Box.HLINE, border_style)
+    win.write_char(win_height - 3, win_width - 1, Box.RTEE, border_style)
 
-    # Text area height: between top border and separator
-    text_area_height = win_height - 4
+    # Text area: rows 1 .. height-4
+    text_height = win_height - 4
+    text_width = win_width - 3  # borders + 1 space margin
     max_scroll = _max_scroll_info(lines, win)
 
-    # Leave extra space for scrollbar column when content is scrollable
-    text_display_width = win_width - (5 if max_scroll > 0 else 4)
-
-    # Draw text content with body style
-    for i in range(text_area_height):
+    for i in range(text_height):
         line_idx = scroll + i
         if line_idx < len(lines):
-            _safe_addstr(win, 1 + i, 2, lines[line_idx][:text_display_width])
+            win.write(1 + i, 2, lines[line_idx][:text_width], body_style)
 
-    # Draw scrollbar if content is scrollable
-    if max_scroll > 0:
-        _draw_scrollbar(
-            win,
-            scroll,
-            max_scroll,
-            win_width - 2,
-            1,
-            text_area_height,
-            _style["body"],
-            _style.get("selection", _style["body"]),
-        )
-
-    # Scroll percentage in bottom right
+    # Scroll percentage on the separator line (matching mconf position)
     percentage = int((float(scroll) / max_scroll) * 100) if max_scroll > 0 else 100
     percent_str = "({:3d}%)".format(percentage)
-    _safe_addstr(
-        win, win_height - 2, win_width - len(percent_str) - 2, percent_str, frame_style
-    )
+    if win_width > len(percent_str) + 2:
+        win.write(
+            win_height - 3, win_width - len(percent_str) - 2, percent_str, body_style
+        )
 
-    # Draw Exit button at bottom
-    button_y = win_height - 2
-    button_label = " Exit "
-    button_x = (win_width - len(button_label) - 2) // 2
-
-    # Fill button row with frame background
-    win.attrset(frame_style)
-    for i in range(1, win_width - 1):
-        _safe_addch(win, button_y, i, ord(" "))
-
-    # Draw Exit button
-    _print_button(win, button_label, button_y, button_x, True)
-
-    win.noutrefresh()
+    # Exit button at height - 2, centered (matching dialog_textbox)
+    _print_button(win, " Exit ", win_height - 2, win_width // 2 - 4, True)
 
 
 def _max_scroll_info(lines, win):
@@ -3153,47 +2963,121 @@ def _max_scroll_info(lines, win):
 
 
 def _info_str_mconf(node):
-    # Returns information about the menu node 'node' in mconf format.
+    # Returns information about the menu node 'node' in mconf format,
+    # matching menu_get_ext_help() + get_symbol_str() from mconf.c.
 
-    # sc = symbol/choice, or None for MENU/COMMENT
     sc = node.item if isinstance(node.item, (Symbol, Choice)) else None
 
-    lines = []
+    s = ""
 
-    # Help text first (or "no help available")
-    if sc and sc.nodes and sc.nodes[0].help:
-        lines.append(sc.nodes[0].help.rstrip())
+    # MENU/COMMENT nodes lack a 'help' slot assignment, so use getattr
+    # to avoid AttributeError.
+    node_help = getattr(node, "help", None)
+
+    # CONFIG_NAME header (only when node has help and symbol/choice has name)
+    if node_help and sc and sc.name:
+        s += "CONFIG_{}:\n\n".format(sc.name)
+
+    # Help text or default
+    if node_help:
+        s += node_help.rstrip() + "\n"
     else:
-        lines.append("There is no help available for this option.")
+        s += "There is no help available for this option.\n"
 
-    lines.append("")
-
-    # Symbol/choice-specific header line
-    if isinstance(node.item, Symbol):
-        sym = node.item
-        value_str = sym.str_value
-        if sym.orig_type in (BOOL, TRISTATE):
-            value_str = TRI_TO_STR[sym.tri_value]
-        lines.append(
-            "Symbol: {} [={}]".format(sym.name if sym.name else "<unnamed>", value_str)
-        )
-    elif isinstance(node.item, Choice):
-        if node.item.name:
-            lines.append("Choice: {}".format(node.item.name))
-
-    # Type, prompt, and location are common to Symbol and Choice
+    # get_symbol_str() equivalent -- only for symbols/choices
     if sc:
-        lines.append("Type  : {}".format(TYPE_TO_STR[sc.orig_type].lower()))
+        # Symbol: NAME [=VALUE] and Type (only if named)
+        if sc.name:
+            s += "Symbol: {} [={}]\n".format(sc.name, sc.str_value)
+            s += "Type  : {}\n".format(TYPE_TO_STR[sc.orig_type].lower())
+            if isinstance(sc, Symbol) and sc.orig_type in (INT, HEX):
+                for low, high, cond in sc.orig_ranges:
+                    if expr_value(cond):
+                        s += "Range : [{}..{}]\n".format(low.str_value, high.str_value)
+                        break
 
-    if node.prompt:
-        lines.append("Prompt: {}".format(node.prompt[0]))
+        # Definitions with prompts first
+        for n in sc.nodes:
+            if n.prompt:
+                s += "Defined at {}:{}\n".format(n.filename, n.linenr)
+                s += "  Prompt: {}\n".format(n.prompt[0])
+                if n.dep is not _kconf.y:
+                    s += "  Depends on: {}\n".format(_expr_str(n.dep))
+                # Location hierarchy (matching get_prompt_str in mconf)
+                submenu = []
+                m = n
+                while m is not _kconf.top_node and len(submenu) < 8:
+                    submenu.append(m)
+                    m = m.parent
+                s += "  Location:\n"
+                for j in range(len(submenu)):
+                    pm = submenu[len(submenu) - 1 - j]
+                    indent = 2 * j + 4
+                    prompt_text = (
+                        pm.prompt[0] if pm.prompt else standard_sc_expr_str(pm.item)
+                    )
+                    s += "{}-> {}".format(" " * indent, prompt_text)
+                    if isinstance(pm.item, (Symbol, Choice)):
+                        name = pm.item.name if pm.item.name else "<choice>"
+                        s += " ({} [={}])".format(name, pm.item.str_value)
+                    s += "\n"
 
-    if sc and sc.nodes:
-        lines.append(
-            "  Defined at {}:{}".format(sc.nodes[0].filename, sc.nodes[0].linenr)
-        )
+        # Definitions without prompts
+        for n in sc.nodes:
+            if not n.prompt:
+                s += "Defined at {}:{}\n".format(n.filename, n.linenr)
+                if n.dep is not _kconf.y:
+                    s += "  Depends on: {}\n".format(_expr_str(n.dep))
 
-    return "\n".join(lines)
+        # Selects (symbols only)
+        if isinstance(sc, Symbol) and sc.selects:
+            sel_strs = [_expr_str(sel_sym) for sel_sym, cond in sc.orig_selects]
+            s += "Selects: {}\n".format(" && ".join(sel_strs))
+
+        # Selected by
+        if isinstance(sc, Symbol) and sc.rev_dep is not _kconf.n:
+            for val, label in (
+                (2, "Selected by [y]:"),
+                (1, "Selected by [m]:"),
+                (0, "Selected by [n]:"),
+            ):
+                sels = [
+                    si for si in split_expr(sc.rev_dep, OR) if expr_value(si) == val
+                ]
+                if sels:
+                    s += label + "\n"
+                    for si in sels:
+                        parts = split_expr(si, AND)
+                        if parts and isinstance(parts[0], Symbol):
+                            s += "  - {}\n".format(parts[0].name)
+
+        # Implies (symbols only)
+        if isinstance(sc, Symbol) and sc.implies:
+            imp_strs = [_expr_str(imp_sym) for imp_sym, cond in sc.orig_implies]
+            s += "Implies: {}\n".format(" && ".join(imp_strs))
+
+        # Implied by
+        if isinstance(sc, Symbol) and sc.weak_rev_dep is not _kconf.n:
+            for val, label in (
+                (2, "Implied by [y]:"),
+                (1, "Implied by [m]:"),
+                (0, "Implied by [n]:"),
+            ):
+                imps = [
+                    si
+                    for si in split_expr(sc.weak_rev_dep, OR)
+                    if expr_value(si) == val
+                ]
+                if imps:
+                    s += label + "\n"
+                    for si in imps:
+                        parts = split_expr(si, AND)
+                        if parts and isinstance(parts[0], Symbol):
+                            s += "  - {}\n".format(parts[0].name)
+
+        s += "\n\n"
+
+    return s
 
 
 def _info_str(node):
@@ -3518,21 +3402,14 @@ def _expr_str(expr):
     return expr_str(expr, _name_and_val_str)
 
 
-def _styled_win(style):
-    # Returns a new curses window with style 'style' and space as the fill
-    # character. The initial dimensions are (1, 1), so the window needs to be
+def _styled_region(style):
+    # Returns a new rawterm Region with style 'style' and space as the fill
+    # character. The initial dimensions are (1, 1), so the region needs to be
     # sized and positioned separately.
 
-    win = curses.newwin(1, 1)
-    _set_style(win, style)
+    win = _term.region(1, 1)
+    win.fill(_style[style])
     return win
-
-
-def _set_style(win, style):
-    # Changes the style of an existing window
-    # Use bkgd() to immediately fill window with background
-
-    win.bkgd(" ", _style[style])
 
 
 def _max_scroll(lst, win):
@@ -3545,8 +3422,8 @@ def _max_scroll(lst, win):
 
 def _edit_text(c, s, i, hscroll, width):
     # Implements text editing commands for edit boxes. Takes a character (which
-    # could also be e.g. curses.KEY_LEFT) and the edit box state, and returns
-    # the new state after the character has been processed.
+    # could also be e.g. Key.LEFT) and the edit box state, and returns the new
+    # state after the character has been processed.
     #
     # c:
     #   Character from user
@@ -3567,26 +3444,26 @@ def _edit_text(c, s, i, hscroll, width):
     # Return value:
     #   An (s, i, hscroll) tuple for the new state
 
-    if c == curses.KEY_LEFT:
+    if c == Key.LEFT:
         if i > 0:
             i -= 1
 
-    elif c == curses.KEY_RIGHT:
+    elif c == Key.RIGHT:
         if i < len(s):
             i += 1
 
-    elif c in (curses.KEY_HOME, "\x01"):  # \x01 = CTRL-A
+    elif c in (Key.HOME, "\x01"):  # \x01 = CTRL-A
         i = 0
 
-    elif c in (curses.KEY_END, "\x05"):  # \x05 = CTRL-E
+    elif c in (Key.END, "\x05"):  # \x05 = CTRL-E
         i = len(s)
 
-    elif c in (curses.KEY_BACKSPACE, _ERASE_CHAR):
+    elif c == Key.BACKSPACE:
         if i > 0:
             s = s[: i - 1] + s[i:]
             i -= 1
 
-    elif c == curses.KEY_DC:
+    elif c == Key.DELETE:
         s = s[:i] + s[i + 1 :]
 
     elif c == "\x17":  # \x17 = CTRL-W
@@ -3860,101 +3737,18 @@ def _is_num(name):
     return True
 
 
-def _getch_compat(win):
-    # Uses get_wch() if available (Python 3.3+) and getch() otherwise.
-    #
-    # Also falls back on getch() if get_wch() raises curses.error, to work
-    # around an issue when resizing the terminal on at least macOS Catalina.
-    # See https://github.com/ulfalizer/Kconfiglib/issues/84.
-    #
-    # Also handles a PDCurses resizing quirk.
-
-    try:
-        c = win.get_wch()
-    except (AttributeError, curses.error):
-        c = win.getch()
-        if 0 <= c <= 255:
-            c = chr(c)
-
-    # Decent resizing behavior on PDCurses requires calling resize_term(0, 0)
-    # after receiving KEY_RESIZE, while ncurses (usually) handles terminal
-    # resizing automatically in get(_w)ch() (see the end of the
-    # resizeterm(3NCURSES) man page).
-    #
-    # resize_term(0, 0) reliably fails and does nothing on ncurses, so this
-    # hack gives ncurses/PDCurses compatibility for resizing. I don't know
-    # whether it would cause trouble for other implementations.
-    if c == curses.KEY_RESIZE:
-        try:
-            curses.resize_term(0, 0)
-        except curses.error:
-            pass
-
-    return c
-
-
 def _warn(*args):
-    # Temporarily returns from curses to shell mode and prints a warning to
-    # stderr. The warning would get lost in curses mode.
-    curses.endwin()
+    # Temporarily exits terminal mode and prints a warning to stderr.
+    # The warning would get lost in terminal mode.
+    try:
+        _term.suspend()
+    except Exception:
+        pass
     print("menuconfig warning: ", end="", file=sys.stderr)
     print(*args, file=sys.stderr)
-    curses.doupdate()
-
-
-# Ignore exceptions from some functions that might fail, e.g. for small
-# windows. They usually do reasonable things anyway.
-
-
-def _safe_curs_set(visibility):
     try:
-        curses.curs_set(visibility)
-    except curses.error:
-        pass
-
-
-def _safe_addstr(win, *args):
-    # Clip the line to avoid wrapping to the next line, which looks glitchy.
-    # addchstr() would do it for us, but it's not available in the 'curses'
-    # module.
-
-    attr = None
-    if isinstance(args[0], str):
-        y, x = win.getyx()
-        s = args[0]
-        if len(args) == 2:
-            attr = args[1]
-    else:
-        y, x, s = args[:3]
-        if len(args) == 4:
-            attr = args[3]
-
-    maxlen = _width(win) - x
-    s = s.expandtabs()
-
-    try:
-        # The 'curses' module uses wattr_set() internally if you pass 'attr',
-        # overwriting the background style, so setting 'attr' to 0 in the first
-        # case won't do the right thing
-        if attr is None:
-            win.addnstr(y, x, s, maxlen)
-        else:
-            win.addnstr(y, x, s, maxlen, attr)
-    except curses.error:
-        pass
-
-
-def _safe_addch(win, *args):
-    try:
-        win.addch(*args)
-    except curses.error:
-        pass
-
-
-def _safe_move(win, *args):
-    try:
-        win.move(*args)
-    except curses.error:
+        _term.resume()
+    except Exception:
         pass
 
 
