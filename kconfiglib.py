@@ -1024,11 +1024,11 @@ class Kconfig(object):
         self.warnings = []
 
         self.config_prefix = os.getenv("CONFIG_", "CONFIG_")
-        # Regular expressions for parsing .config files
-        self._set_match = _re_match(self.config_prefix + r"([^=]+)=(.*)")
-        self._unset_match = _re_match(
-            r"# {}([^ ]+) is not set".format(self.config_prefix)
-        )
+        # Regular expressions for parsing .config files.
+        # Escape the prefix to prevent regex injection via CONFIG_ env var.
+        escaped_prefix = re.escape(self.config_prefix)
+        self._set_match = _re_match(escaped_prefix + r"([^=]+)=(.*)")
+        self._unset_match = _re_match(r"# {}([^ ]+) is not set".format(escaped_prefix))
 
         self.config_header = os.getenv("KCONFIG_CONFIG_HEADER", "")
         self.header_header = os.getenv("KCONFIG_AUTOHEADER_HEADER", "")
@@ -3864,33 +3864,37 @@ class Kconfig(object):
                         self._make_and(cur.prompt[1], self._make_and(visible_if, dep)),
                     )
 
-                # Propagate dependencies to defaults
-                if cur.defaults:
-                    cur.defaults = [
-                        (default, self._make_and(cond, dep), loc)
-                        for default, cond, loc in cur.defaults
-                    ]
+                # When dep is y (the common case for top-level symbols),
+                # _make_and(cond, dep) returns cond unchanged, so the list
+                # comprehensions would rebuild identical lists. Skip them.
+                if dep is not self.y:
+                    # Propagate dependencies to defaults
+                    if cur.defaults:
+                        cur.defaults = [
+                            (default, self._make_and(cond, dep), loc)
+                            for default, cond, loc in cur.defaults
+                        ]
 
-                # Propagate dependencies to ranges
-                if cur.ranges:
-                    cur.ranges = [
-                        (low, high, self._make_and(cond, dep), loc)
-                        for low, high, cond, loc in cur.ranges
-                    ]
+                    # Propagate dependencies to ranges
+                    if cur.ranges:
+                        cur.ranges = [
+                            (low, high, self._make_and(cond, dep), loc)
+                            for low, high, cond, loc in cur.ranges
+                        ]
 
-                # Propagate dependencies to selects
-                if cur.selects:
-                    cur.selects = [
-                        (target, self._make_and(cond, dep), loc)
-                        for target, cond, loc in cur.selects
-                    ]
+                    # Propagate dependencies to selects
+                    if cur.selects:
+                        cur.selects = [
+                            (target, self._make_and(cond, dep), loc)
+                            for target, cond, loc in cur.selects
+                        ]
 
-                # Propagate dependencies to implies
-                if cur.implies:
-                    cur.implies = [
-                        (target, self._make_and(cond, dep), loc)
-                        for target, cond, loc in cur.implies
-                    ]
+                    # Propagate dependencies to implies
+                    if cur.implies:
+                        cur.implies = [
+                            (target, self._make_and(cond, dep), loc)
+                            for target, cond, loc in cur.implies
+                        ]
 
             elif cur.prompt:  # Not a symbol/choice
                 # Propagate dependencies to the prompt. 'visible if' is only
@@ -4196,6 +4200,18 @@ class Kconfig(object):
 
             return True
 
+        # Build a reverse index {symbol -> [nodes]} in a single pass over
+        # all nodes, rather than doing a full tree walk per undefined symbol.
+        # This reduces the algorithm from O(U*N*R) to O(N*R + U) where U is
+        # the number of undefined symbols, N is the number of nodes, and R is
+        # the cost of building node.referenced sets.
+        sym_to_nodes = {}
+        for node in self.node_iter():
+            for ref_sym in node.referenced:
+                if ref_sym not in sym_to_nodes:
+                    sym_to_nodes[ref_sym] = []
+                sym_to_nodes[ref_sym].append(node)
+
         for sym in (self.syms.viewvalues if _IS_PY2 else self.syms.values)():
             # - sym.nodes empty means the symbol is undefined (has no
             #   definition locations)
@@ -4206,13 +4222,14 @@ class Kconfig(object):
             # - The MODULES symbol always exists
             if not sym.nodes and not is_num(sym.name) and sym.name != "MODULES":
 
-                msg = "undefined symbol {}:".format(sym.name)
-                for node in self.node_iter():
-                    if sym in node.referenced:
-                        msg += "\n\n- Referenced at {}:{}:\n\n{}".format(
+                parts = ["undefined symbol {}:".format(sym.name)]
+                for node in sym_to_nodes.get(sym, ()):
+                    parts.append(
+                        "\n\n- Referenced at {}:{}:\n\n{}".format(
                             node.loc[0], node.loc[1], node
                         )
-                self._warn(msg)
+                    )
+                self._warn("".join(parts))
 
     def _warn(self, msg, loc=None):
         # For printing general warnings
@@ -6019,6 +6036,8 @@ class MenuNode(object):
         "selects",
         "implies",
         "ranges",
+        # Cached referenced set (populated on first access)
+        "_cached_referenced",
     )
 
     def __init__(self):
@@ -6029,6 +6048,7 @@ class MenuNode(object):
         self.selects = []
         self.implies = []
         self.ranges = []
+        self._cached_referenced = None
 
     @property
     def filename(self):
@@ -6088,6 +6108,9 @@ class MenuNode(object):
         """
         See the class documentation.
         """
+        if self._cached_referenced is not None:
+            return self._cached_referenced
+
         # self.dep is included to catch dependencies from a lone 'depends on'
         # when there are no properties to propagate it to
         res = expr_items(self.dep)
@@ -6115,7 +6138,8 @@ class MenuNode(object):
             res.add(high)
             res |= expr_items(cond)
 
-        return res
+        self._cached_referenced = frozenset(res)
+        return self._cached_referenced
 
     def __repr__(self):
         """
@@ -6653,6 +6677,63 @@ def standard_config_filename():
     return os.getenv("KCONFIG_CONFIG", ".config")
 
 
+def _needs_save(kconf):
+    """
+    Returns True if the current configuration state differs from what was
+    loaded from the .config file (i.e., saving would modify the .config).
+
+    Used by menuconfig and guiconfig to determine whether to prompt for save.
+    """
+    if kconf.missing_syms:
+        # Assignments to undefined symbols in the .config
+        return True
+
+    for sym in kconf.unique_defined_syms:
+        if sym.user_value is None:
+            if sym.config_string:
+                # Unwritten symbol
+                return True
+        elif sym.orig_type in _BOOL_TRISTATE:
+            if sym.tri_value != sym.user_value:
+                # Written bool/tristate symbol, new value
+                return True
+        elif sym.str_value != sym.user_value:
+            # Written string/int/hex symbol, new value
+            return True
+
+    return False
+
+
+def _extract_controlling_symbols(expr_list):
+    """
+    Extracts the primary controlling symbol from each expression string.
+    Returns a list of unique symbol names.
+
+    For "A && B", extracts "A" (the symbol doing the select/imply).
+    For "A || B", extracts both "A" and "B".
+    For simple "A", extracts "A".
+
+    Used by menuconfig and guiconfig for select/imply display.
+    """
+    sym_names = []
+    for expr in expr_list:
+        # Split on && first - we only want symbols before &&
+        # For "FOO && BAR", we want FOO (the selector), not BAR (the condition)
+        and_idx = expr.find(" && ")
+        primary = expr[:and_idx].strip() if and_idx != -1 else expr.strip()
+
+        # Now handle || - all parts are equal
+        if " || " in primary:
+            for part in primary.split(" || "):
+                part = part.strip()
+                if part and part not in sym_names:
+                    sym_names.append(part)
+        elif primary and primary not in sym_names:
+            sym_names.append(primary)
+
+    return sym_names
+
+
 def load_allconfig(kconf, filename):
     """
     Use Kconfig.load_allconfig() instead, which was added in Kconfiglib 13.4.0.
@@ -7133,7 +7214,7 @@ def _found_dep_loop(loop, cur):
 
             if item.weak_rev_dep is not item.kconfig.n:
                 msg += "(imply-related dependencies: {})\n\n".format(
-                    expr_str(item.rev_dep)
+                    expr_str(item.weak_rev_dep)
                 )
 
     msg += "...depends again on " + loop[0].name_and_loc
