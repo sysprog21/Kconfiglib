@@ -119,7 +119,6 @@
 #
 #   Enter a symbol/choice name, "load_config", or "write_config" (or press CTRL+D to exit): ^D
 
-from __future__ import print_function
 import readline
 import sys
 
@@ -137,10 +136,6 @@ from kconfiglib import (
     expr_value,
     TRI_TO_STR,
 )
-
-# Python 2/3 compatibility hack
-if sys.version_info[0] < 3:
-    input = raw_input
 
 
 def indent_print(s, indent):

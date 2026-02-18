@@ -70,7 +70,6 @@
 #     CONFIG_BAR=y
 #     CONFIG_BAZ="baz string"
 
-from __future__ import print_function
 import sys
 
 from kconfiglib import Kconfig, BOOL, TRISTATE, TRI_TO_STR
