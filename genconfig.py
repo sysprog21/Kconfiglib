@@ -98,8 +98,7 @@ unset). Files appear in the order they're 'source'd.
 Write a list of all environment variables referenced in Kconfig files to
 OUTPUT_FILE, with one variable per line. Each line has the format NAME=VALUE.
 Only environment variables referenced with the preprocessor $(VAR) syntax are
-included, and not variables referenced with the older $VAR syntax (which is
-only supported for backwards compatibility).
+included.
 """,
     )
 
@@ -121,10 +120,8 @@ only supported for backwards compatibility).
     elif "KCONFIG_AUTOHEADER" in os.environ:
         kconf.write_autoconf()
     else:
-        # Kconfiglib defaults to include/generated/autoconf.h to be
-        # compatible with the C tools. 'config.h' is used here instead for
-        # backwards compatibility. It's probably a saner default for tools
-        # as well.
+        # Kconfiglib defaults to include/generated/autoconf.h to match the
+        # C tools. 'config.h' is used here as a standalone-tool default.
         kconf.write_autoconf("config.h")
 
     if args.config_out is not None:

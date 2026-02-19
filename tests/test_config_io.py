@@ -188,6 +188,18 @@ header header from env.
     )
 
 
+# -- empty menu "end of" comment -----------------------------------------------
+
+
+def test_empty_menu_end_comment():
+    c = Kconfig("tests/Kempty_menu", warn=False)
+    config = c._config_contents("")
+    # Empty menus must still get an "end of" comment, matching C tools
+    assert "# end of Empty Menu\n" in config
+    # Populated menus should too (baseline)
+    assert "# end of Populated Menu\n" in config
+
+
 # -- Kconfig fetching and separation ------------------------------------------
 
 

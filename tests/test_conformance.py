@@ -1,23 +1,23 @@
 # Copyright (c) 2011-2019 Ulf Magnusson
 # SPDX-License-Identifier: ISC
 #
-# Compatibility tests that compare Kconfiglib output against the C Kconfig
+# Conformance tests that compare Kconfiglib output against the C Kconfig
 # tools (scripts/kconfig/conf) in a Linux kernel source tree.
 #
 # These tests must be run from the root of a Linux kernel tree that has
 # Kconfiglib checked out (or symlinked) as a subdirectory.  The C conf
-# tool must already be built (or the test fixture will attempt to build
-# it via 'make allnoconfig').
+# tool (scripts/kconfig/conf) must already be built.
 #
 # Usage:
 #   cd /path/to/linux
-#   python -m pytest Kconfiglib/tests/test_compat.py -v
+#   python -m pytest Kconfiglib/tests/test_conformance.py -v
 #
 # The entire module is skipped when scripts/kconfig/conf does not exist.
 
 import difflib
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,7 +36,7 @@ pytestmark = [
         not os.path.exists("scripts/kconfig/conf"),
         reason="Requires Linux kernel source tree with scripts/kconfig/conf built",
     ),
-    pytest.mark.compat,
+    pytest.mark.conformance,
 ]
 
 # ---------------------------------------------------------------------------
@@ -125,15 +125,16 @@ def all_arch_srcarch():
 
 
 def run_conf_and_compare(script, conf_flag, arch):
-    """Run a Kconfiglib script via 'make scriptconfig', then run the C
-    implementation with *conf_flag*, and compare the resulting .config files.
+    """Run a Kconfiglib script and the C conf tool, then compare .config files.
+
+    Both sides are invoked directly (not through 'make') so they inherit
+    the identical process environment set up by the kernel_env fixture.
+    This eliminates asymmetry: both parsers see the same CC, LD,
+    KERNELVERSION, RUSTC (or lack thereof), etc., ensuring that $(shell)
+    evaluations in Kconfig files produce identical results.  It also avoids
+    platform-specific 'make' failures (e.g. macOS cross-arch builds).
     """
-    _make = os.environ.get("MAKE", "make")
-    _ld = os.environ.get("LD")
-    _ld_override = f"LD={_ld}" if _ld else ""
-    shell(
-        f"{_make} {_ld_override} scriptconfig SCRIPT={script} PYTHONCMD='{sys.executable}'"
-    )
+    shell(f"{shlex.quote(sys.executable)} {shlex.quote(script)} Kconfig")
     shell("mv .config ._config")
     shell(f"scripts/kconfig/conf --{conf_flag} Kconfig")
     compare_configs(arch)
@@ -206,7 +207,7 @@ def equal_configs():
         with open("._config") as f:
             our = f.readlines()
     except FileNotFoundError:
-        print("._config not found. Did you forget to apply the Makefile patch?")
+        print("._config not found (Kconfiglib script may have failed)")
         return False
 
     if their == our:

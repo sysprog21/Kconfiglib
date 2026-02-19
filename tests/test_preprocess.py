@@ -11,14 +11,11 @@ from conftest import verify_value, verify_str
 
 
 def _verify_variable(c, name, unexp_value, exp_value, recursive, *args):
-    """Check a preprocessor variable's unexpanded value, expanded value,
+    """Check a preprocessor variable's unexpanded value,
     expanded_value_w_args(), and is_recursive flag."""
     var = c.variables[name]
 
     assert var.value == unexp_value, f"{name} unexpanded value"
-
-    if not args:
-        assert var.expanded_value == exp_value, f"{name} expanded_value"
 
     assert (
         var.expanded_value_w_args(*args) == exp_value
@@ -151,13 +148,13 @@ def test_preprocessor_recursive(preprocess_kconfig):
     c = preprocess_kconfig
 
     with pytest.raises(KconfigError):
-        c.variables["rec-1"].expanded_value
+        c.variables["rec-1"].expanded_value_w_args()
 
     # Indirectly verifies that it's not recursive
     _verify_variable(c, "safe-fn-rec-res", "$(safe-fn-rec,safe-fn-rec-2)", "foo", True)
 
     with pytest.raises(KconfigError):
-        c.variables["unsafe-fn-rec"].expanded_value
+        c.variables["unsafe-fn-rec"].expanded_value_w_args()
 
 
 # ===========================================================================
@@ -203,7 +200,7 @@ def test_preprocessor_misc(preprocess_kconfig):
     _verify_variable(c, "error-n-res", "", "", False)
 
     with pytest.raises(KconfigError):
-        c.variables["error-y-res"].expanded_value
+        c.variables["error-y-res"].expanded_value_w_args()
 
     # Check Kconfig.env_vars
     assert c.env_vars == {"ENV_1", "ENV_2", "ENV_3", "ENV_4", "ENV_5", "ENV_6"}
@@ -252,13 +249,13 @@ def test_user_defined_functions(monkeypatch):
     )
 
     with pytest.raises(KconfigError):
-        c.variables["one-zero"].expanded_value
+        c.variables["one-zero"].expanded_value_w_args()
 
     with pytest.raises(KconfigError):
-        c.variables["one-two"].expanded_value
+        c.variables["one-two"].expanded_value_w_args()
 
     with pytest.raises(KconfigError):
-        c.variables["one-or-more-zero"].expanded_value
+        c.variables["one-or-more-zero"].expanded_value_w_args()
 
 
 # ===========================================================================

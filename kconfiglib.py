@@ -438,13 +438,13 @@ Some optional warnings can be controlled via environment variables:
     that all hex literals must be prefixed with "0x" or "0X", to make it
     possible to distinguish them from symbol references.
 
+    KCONFIG_STRICT is an older alias for this environment variable, supported
+    for backwards compatibility.
+
     Some projects (e.g. the Linux kernel) use multiple Kconfig trees with many
     shared Kconfig files, leading to some safe undefined symbol references.
     KCONFIG_WARN_UNDEF is useful in projects that only have a single Kconfig
     tree though.
-
-    KCONFIG_STRICT is an older alias for this environment variable, supported
-    for backwards compatibility.
 
   - KCONFIG_WARN_UNDEF_ASSIGN: If set to 'y', warnings will be generated for
     all assignments to undefined symbols within .config files. By default, no
@@ -667,10 +667,8 @@ class Kconfig(object):
       The predefined constant symbols n/m/y. Also available in const_syms.
 
     modules:
-      The Symbol instance for the modules symbol. Currently hardcoded to
-      MODULES, which is backwards compatible. Kconfiglib will warn if
-      'option modules' is set on some other symbol. Tell me if you need proper
-      'option modules' support.
+      The Symbol instance for the modules symbol. Hardcoded to MODULES.
+      Kconfiglib will warn if 'option modules' is set on some other symbol.
 
       'modules' is never None. If the MODULES symbol is not explicitly defined,
       its tri_value will be 0 (n), as expected.
@@ -1154,7 +1152,6 @@ class Kconfig(object):
         # KCONFIG_STRICT is an older alias for KCONFIG_WARN_UNDEF, supported
         # for backwards compatibility
         if os.getenv("KCONFIG_WARN_UNDEF") == "y" or os.getenv("KCONFIG_STRICT") == "y":
-
             self._check_undef_syms()
 
         # Build Symbol._dependents for all symbols and choices
@@ -1753,6 +1750,14 @@ class Kconfig(object):
 
                 add("\n#\n# {}\n#\n".format(node.prompt[0]))
                 after_end_comment = False
+
+                # Empty menus (no children) still need an "end of" comment
+                # to match the C tools. Normally the comment is emitted when
+                # ascending back up from children, but that never happens
+                # for a childless menu.
+                if item is MENU and not node.list:
+                    add("# end of {}\n".format(node.prompt[0]))
+                    after_end_comment = True
 
     def write_min_config(self, filename, header=None):
         """
@@ -2430,17 +2435,8 @@ class Kconfig(object):
         # to the previous token. See _STRING_LEX for why this is needed.
         token = _get_keyword(match.group(1))
         if not token:
-            # Backwards compatibility with old versions of the C tools, which
-            # (accidentally) accepted stuff like "--help--" and "-help---".
-            # This was fixed in the C tools by commit c2264564 ("kconfig: warn
-            # of unhandled characters in Kconfig commands"), committed in July
-            # 2015, but it seems people still run Kconfiglib on older kernels.
-            if s.strip(" \t\n-") == "help":
-                return (_T_HELP, None)
-
-            # If the first token is not a keyword (and not a weird help token),
-            # we have a preprocessor variable assignment (or a bare macro on a
-            # line)
+            # If the first token is not a keyword, we have a preprocessor
+            # variable assignment (or a bare macro on a line)
             self._parse_assignment(s)
             return (None,)
 
@@ -4618,6 +4614,9 @@ class Symbol(object):
                         break
                 else:
                     val_num = 0  # strtoll() on empty string
+                    # Match the C implementation, which initializes
+                    # newval.val = "0" for S_INT and "0x0" for S_HEX
+                    val = "0" if self.orig_type is INT else "0x0"
                     self._origin = _T_DEFAULT, None
 
                 # This clamping procedure runs even if there's no default
@@ -6277,8 +6276,7 @@ class Variable(object):
       KconfigError if the expansion seems to be stuck in a loop.
 
       Accessing this field is the same as calling expanded_value_w_args() with
-      no arguments. I hadn't considered function arguments when adding it. It
-      is retained for backwards compatibility though.
+      no arguments. It is retained for backwards compatibility.
 
     is_recursive:
       True if the variable is recursive (defined with =).

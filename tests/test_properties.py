@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: ISC
 #
 # Property tests: help strings,
-# locations, origins, source/rsource/gsource/grsource, symlinks,
+# locations, origins, source/rsource, symlinks,
 # node_iter(), include_path, and item lists.
 
 import os
@@ -109,7 +109,7 @@ g
     )
 
 
-# -- locations, origins, source/rsource/gsource/grsource --------------------
+# -- locations, origins, source/rsource --------------------------------------
 
 
 def test_locations_and_origins(monkeypatch):
@@ -155,13 +155,9 @@ def test_locations_and_origins(monkeypatch):
             "tests/sub/Klocation_rsourced:2",
             "tests/sub/Klocation_gsourced1:1",
             "tests/sub/Klocation_gsourced2:1",
-            "tests/sub/Klocation_gsourced1:1",
-            "tests/sub/Klocation_gsourced2:1",
             "tests/sub/Klocation_grsourced1:1",
             "tests/sub/Klocation_grsourced2:1",
-            "tests/sub/Klocation_grsourced1:1",
-            "tests/sub/Klocation_grsourced2:1",
-            "tests/Klocation:78",
+            "tests/Klocation:70",
         )
 
         _verify_locations(
@@ -197,10 +193,6 @@ def test_locations_and_origins(monkeypatch):
             "tests/sub/Klocation_rsourced",
             "tests/sub/Klocation_gsourced1",
             "tests/sub/Klocation_gsourced2",
-            "tests/sub/Klocation_gsourced1",
-            "tests/sub/Klocation_gsourced2",
-            "tests/sub/Klocation_grsourced1",
-            "tests/sub/Klocation_grsourced2",
             "tests/sub/Klocation_grsourced1",
             "tests/sub/Klocation_grsourced2",
         ]
@@ -298,7 +290,7 @@ def test_node_iter(monkeypatch):
         "MANY_DEF",
         "MENU_HOOK",
         "COMMENT_HOOK",
-    ] + 10 * [
+    ] + 6 * [
         "MANY_DEF"
     ]
 
@@ -386,7 +378,7 @@ def test_include_path(monkeypatch):
 def test_item_lists():
     c = Kconfig("tests/Kitemlists")
 
-    _verify_prompts(c.choices, "choice 1", "choice 2", "choice 3", "choice 2")
+    _verify_prompts(c.unique_choices, "choice 1", "choice 2", "choice 3")
     _verify_prompts(c.menus, "menu 1", "menu 2", "menu 3", "menu 4", "menu 5")
     _verify_prompts(c.comments, "comment 1", "comment 2", "comment 3")
 

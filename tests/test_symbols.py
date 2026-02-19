@@ -266,12 +266,12 @@ def test_ranges():
     ):
         assert c.syms[sym_name].ranges, f"{sym_name} should have ranges"
 
-    # hex/int symbols without defaults should get no default value
-    verify_value(c, "HEX_NO_RANGE", "")
-    verify_value(c, "INT_NO_RANGE", "")
-    # And neither if all ranges are disabled
-    verify_value(c, "HEX_ALL_RANGES_DISABLED", "")
-    verify_value(c, "INT_ALL_RANGES_DISABLED", "")
+    # hex/int symbols without defaults get the C tools' default: "0"/"0x0"
+    verify_value(c, "HEX_NO_RANGE", "0x0")
+    verify_value(c, "INT_NO_RANGE", "0")
+    # Same when all ranges are disabled
+    verify_value(c, "HEX_ALL_RANGES_DISABLED", "0x0")
+    verify_value(c, "INT_ALL_RANGES_DISABLED", "0")
     # Make sure they are assignable though, and test that the form of the user
     # value is reflected in the value for hex symbols
     assign_and_verify(c, "HEX_NO_RANGE", "0x123")
@@ -292,10 +292,10 @@ def test_ranges():
     # hex/int symbols with no defaults but valid ranges should default to the
     # lower end of the range if it's > 0
     verify_value(c, "HEX_RANGE_10_20", "0x10")
-    verify_value(c, "HEX_RANGE_0_10", "")
+    verify_value(c, "HEX_RANGE_0_10", "0x0")
     verify_value(c, "INT_RANGE_10_20", "10")
-    verify_value(c, "INT_RANGE_0_10", "")
-    verify_value(c, "INT_RANGE_NEG_10_10", "")
+    verify_value(c, "INT_RANGE_0_10", "0")
+    verify_value(c, "INT_RANGE_NEG_10_10", "0")
 
     # User values and dependent ranges
 
@@ -305,7 +305,7 @@ def test_ranges():
     def verify_range(sym_name, low, high, default):
         # Verifies that all values in the range low-high can be assigned,
         # and that assigning values outside the range reverts the value back to
-        # default (None if it should revert back to "").
+        # default.
 
         is_hex = c.syms[sym_name].type == HEX
 
@@ -347,8 +347,8 @@ def test_ranges():
     verify_range("HEX_RANGE_10_20", 0x10, 0x20, 0x10)
 
     verify_range("INT_RANGE_10_20", 10, 20, 10)
-    verify_range("INT_RANGE_0_10", 0, 10, None)
-    verify_range("INT_RANGE_NEG_10_10", -10, 10, None)
+    verify_range("INT_RANGE_0_10", 0, 10, 0)
+    verify_range("INT_RANGE_NEG_10_10", -10, 10, 0)
 
     # Dependent ranges
 
@@ -378,7 +378,7 @@ def test_ranges():
 
 def test_defconfig_filename(monkeypatch):
     # The Kconfig test-data files (Kdefconfig_existent, etc.) contain hardcoded
-    # "Kconfiglib/tests/..." paths.  Compat tests run from a kernel tree root
+    # "Kconfiglib/tests/..." paths.  Conformance tests run from a kernel tree root
     # where those paths resolve.  Running from the project root we need a
     # "Kconfiglib" symlink pointing here.
     kconfiglib_link = os.path.join(os.getcwd(), "Kconfiglib")
