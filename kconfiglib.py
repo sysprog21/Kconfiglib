@@ -1573,6 +1573,9 @@ class Kconfig(object):
             if not sym._write_to_conf:
                 continue
 
+            if sym.is_transitional:
+                continue
+
             if sym.orig_type in _BOOL_TRISTATE:
                 if val == "y":
                     add("#define {}{} 1\n".format(self.config_prefix, sym.name))
@@ -1799,6 +1802,9 @@ class Kconfig(object):
         add = chunks.append
 
         for sym in self.unique_defined_syms:
+            if sym.is_transitional:
+                continue
+
             # Skip symbols that cannot be changed. Only check
             # non-choice symbols, as selects don't affect choice
             # symbols.
@@ -1902,6 +1908,9 @@ class Kconfig(object):
             # instead, to avoid accessing the internal _write_to_conf variable
             # (though it's likely to keep working).
             val = sym.str_value
+
+            if sym.is_transitional:
+                continue
 
             # n tristate values do not get written to auto.conf and autoconf.h,
             # making a missing symbol logically equivalent to n
@@ -4813,6 +4822,9 @@ class Symbol(object):
         # hidden function call due to property magic.
         val = self.str_value
         if not self._write_to_conf:
+            return ""
+
+        if self.is_transitional:
             return ""
 
         if self.orig_type in _BOOL_TRISTATE:
