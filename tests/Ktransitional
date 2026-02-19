@@ -1,0 +1,23 @@
+config NEW_BOOL
+    bool "new bool option"
+    default LEGACY_BOOL
+
+config LEGACY_BOOL
+    bool "legacy bool (deprecated)"
+    transitional
+
+config NEW_INT
+    int "new int option"
+    default LEGACY_INT
+
+config LEGACY_INT
+    int "legacy int (deprecated)"
+    transitional
+
+config NORMAL_BOOL
+    bool "normal bool"
+    default y
+
+config NORMAL_INT
+    int "normal int"
+    default 42

@@ -22,7 +22,6 @@ jobs:
         #       shell). Linux/macOS run selftests, compatibility tests, and
         #       example scripts.
         target:
-        # Python 3.12
         - python: '3.12'
           os: Linux
           builder: ubuntu-24.04
@@ -59,13 +58,27 @@ jobs:
       run: |
         python -m pip install --user setuptools wheel pytest
 
+    - name: Install GNU toolchain (macOS)
+      # v6.18 kernel Kconfig probes require GNU Make >= 4.0 and a
+      # supported linker (GNU ld or LLD).  macOS ships Make 3.81
+      # and Apple ld, neither of which is compatible.
+      # We add ld.lld to PATH and set LD=ld.lld; reltest forwards LD
+      # as a make command-line variable to override the kernel
+      # Makefile's unconditional LD=$(CROSS_COMPILE)ld assignment.
+      if: ${{ matrix.target.os == 'macOS' }}
+      run: |
+        brew install make lld
+        echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+        echo "$(brew --prefix lld)/bin" >> $GITHUB_PATH
+        echo "LD=ld.lld" >> $GITHUB_ENV
+
     - name: Check out Linux source code
       # Skip for Windows (headless-only mode)
       if: ${{ matrix.target.headless-only != true }}
       uses: actions/checkout@v6
       with:
         repository: torvalds/linux
-        ref: v5.4
+        ref: v6.18
 
     - name: Check out Kconfiglib source code
       uses: actions/checkout@v6

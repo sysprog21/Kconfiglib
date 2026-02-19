@@ -12,10 +12,15 @@
 
 test_script() {
     echo -e "\n================= $1 with $py =================\n"
+    # Forward LD as a make command-line variable so it overrides the
+    # kernel Makefile's unconditional LD=$(CROSS_COMPILE)ld assignment.
+    # Environment variables alone do not override Makefile assignments.
+    local _ld_override=""
+    [ -n "${LD:-}" ] && _ld_override="LD=$LD"
     if (($# == 1)); then
-        make scriptconfig PYTHONCMD=$py SCRIPT=$1
+        ${MAKE:-make} $_ld_override scriptconfig PYTHONCMD=$py SCRIPT=$1
     else
-        make scriptconfig PYTHONCMD=$py SCRIPT=$1 SCRIPT_ARG="$2"
+        ${MAKE:-make} $_ld_override scriptconfig PYTHONCMD=$py SCRIPT=$1 SCRIPT_ARG="$2"
     fi
 
     if (($?)); then

@@ -64,19 +64,21 @@ def kernel_env():
     These are referenced inside the kernel Kconfig files and must be present
     before any Kconfig object is instantiated.
     """
+    os.environ["srctree"] = "."
+    os.environ.setdefault("CC", "gcc")
+    os.environ.setdefault("LD", "ld")
+    _make = os.environ.get("MAKE", "make")
+    _cc = os.environ["CC"]
     os.environ["KERNELVERSION"] = (
-        subprocess.check_output("make kernelversion", shell=True)
+        subprocess.check_output(f"{_make} kernelversion", shell=True)
         .decode("utf-8")
         .rstrip()
     )
     os.environ["CC_VERSION_TEXT"] = (
-        subprocess.check_output("gcc --version | head -n1", shell=True)
+        subprocess.check_output(f"{_cc} --version | head -n1", shell=True)
         .decode("utf-8")
         .rstrip()
     )
-    os.environ["srctree"] = "."
-    os.environ["CC"] = "gcc"
-    os.environ["LD"] = "ld"
     yield
 
 
@@ -126,7 +128,12 @@ def run_conf_and_compare(script, conf_flag, arch):
     """Run a Kconfiglib script via 'make scriptconfig', then run the C
     implementation with *conf_flag*, and compare the resulting .config files.
     """
-    shell(f"make scriptconfig SCRIPT={script} PYTHONCMD='{sys.executable}'")
+    _make = os.environ.get("MAKE", "make")
+    _ld = os.environ.get("LD")
+    _ld_override = f"LD={_ld}" if _ld else ""
+    shell(
+        f"{_make} {_ld_override} scriptconfig SCRIPT={script} PYTHONCMD='{sys.executable}'"
+    )
     shell("mv .config ._config")
     shell(f"scripts/kconfig/conf --{conf_flag} Kconfig")
     compare_configs(arch)
