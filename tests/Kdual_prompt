@@ -1,0 +1,23 @@
+config MODULES
+    bool
+    default y
+
+config BAR
+    bool "BAR"
+    default y
+
+config FOO
+    bool "Foo" if BAR
+
+config FOO
+    bool "Foo (EXPERIMENTAL)" if !BAR
+
+config TBAR
+    tristate "TBAR"
+    default m
+
+config TFOO
+    tristate "TFoo" if TBAR
+
+config TFOO
+    tristate "TFoo (EXPERIMENTAL)" if !TBAR

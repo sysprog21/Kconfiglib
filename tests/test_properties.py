@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from kconfiglib import Kconfig, KconfigError, MenuNode, Symbol
+from kconfiglib import Kconfig, KconfigError, MenuNode, Symbol, expr_value
 
 # -- helpers -----------------------------------------------------------------
 
@@ -389,3 +389,79 @@ def test_item_lists():
     _verify_prompts(c.choices, "choice 1", "choice 2", "choice 3", "choice 2")
     _verify_prompts(c.menus, "menu 1", "menu 2", "menu 3", "menu 4", "menu 5")
     _verify_prompts(c.comments, "comment 1", "comment 2", "comment 3")
+
+
+# -- dual-prompt visibility (ulfalizer#117) ---------------------------------
+
+
+def _prompt_cond_values(sym):
+    """Return list of expr_value(node.prompt[1]) for each node of *sym*."""
+    return [expr_value(node.prompt[1]) for node in sym.nodes if node.prompt]
+
+
+class TestDualPromptVisibility:
+    """When a symbol is defined twice with different prompts gated on mutually
+    exclusive conditions, only the active prompt should be visible.
+
+    Bool guards (BAR / !BAR) yield strict exclusivity: one evaluates to 2 (y),
+    the other to 0 (n).
+
+    Tristate guards (TBAR / !TBAR) follow standard tristate NOT semantics:
+    NOT(m) = m, so when the guard is m both prompts evaluate to 1 (m).  This
+    matches C Kconfig behavior and is not a bug.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self):
+        self.c = Kconfig("tests/Kdual_prompt", warn=False)
+
+    # -- structure ----------------------------------------------------------
+
+    def test_foo_has_two_nodes(self):
+        assert len(self.c.syms["FOO"].nodes) == 2
+
+    def test_tfoo_has_two_nodes(self):
+        assert len(self.c.syms["TFOO"].nodes) == 2
+
+    def test_foo_prompts(self):
+        prompts = [n.prompt[0] for n in self.c.syms["FOO"].nodes]
+        assert prompts == ["Foo", "Foo (EXPERIMENTAL)"]
+
+    def test_tfoo_prompts(self):
+        prompts = [n.prompt[0] for n in self.c.syms["TFOO"].nodes]
+        assert prompts == ["TFoo", "TFoo (EXPERIMENTAL)"]
+
+    # -- bool guard: strict exclusivity -------------------------------------
+
+    def test_bool_bar_y_exclusive(self):
+        """BAR=y: first prompt visible (2), second hidden (0)."""
+        self.c.syms["BAR"].set_value(2)
+        vals = _prompt_cond_values(self.c.syms["FOO"])
+        assert vals == [2, 0]
+
+    def test_bool_bar_n_exclusive(self):
+        """BAR=n: first prompt hidden (0), second visible (2)."""
+        self.c.syms["BAR"].set_value(0)
+        vals = _prompt_cond_values(self.c.syms["FOO"])
+        assert vals == [0, 2]
+
+    # -- tristate guard: m-state both visible (correct per C Kconfig) -------
+
+    def test_tristate_tbar_m_both_visible(self):
+        """TBAR=m: NOT(m) = m, so both prompts evaluate to 1 (m).
+        This is correct tristate logic, not a bug."""
+        self.c.syms["TBAR"].set_value(1)
+        vals = _prompt_cond_values(self.c.syms["TFOO"])
+        assert vals == [1, 1]
+
+    def test_tristate_tbar_y_exclusive(self):
+        """TBAR=y: first prompt visible (2), second hidden (0)."""
+        self.c.syms["TBAR"].set_value(2)
+        vals = _prompt_cond_values(self.c.syms["TFOO"])
+        assert vals == [2, 0]
+
+    def test_tristate_tbar_n_exclusive(self):
+        """TBAR=n: first prompt hidden (0), second visible (2)."""
+        self.c.syms["TBAR"].set_value(0)
+        vals = _prompt_cond_values(self.c.syms["TFOO"])
+        assert vals == [0, 2]
