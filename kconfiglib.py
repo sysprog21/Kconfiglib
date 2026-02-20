@@ -3668,10 +3668,9 @@ class Kconfig(object):
             # to).
             depend_on(sym, sym.direct_dep)
 
-            # In addition to the above, choice symbols depend on the choice
-            # they're in, but that's handled automatically since the Choice is
-            # propagated to the conditions of the properties before
-            # _build_dep() runs.
+            # Choice symbols also depend on their parent choice (and vice
+            # versa).  This bidirectional link is added in _add_choice_deps()
+            # after dependency loop detection.
 
         for choice in self.unique_choices:
             # Choices depend on the following:
@@ -3686,9 +3685,13 @@ class Kconfig(object):
                 depend_on(choice, cond)
 
     def _add_choice_deps(self):
-        # Choices also depend on the choice symbols themselves, because the
-        # y-mode selection of the choice might change if a choice symbol's
-        # visibility changes.
+        # Choices and their member symbols have a bidirectional dependency:
+        #
+        #  - When a choice symbol's visibility changes, the choice selection
+        #    might change  (member -> choice).
+        #
+        #  - When the choice's mode or selection changes, member values
+        #    change  (choice -> member).
         #
         # We add these dependencies separately after dependency loop detection.
         # The invalidation algorithm can handle the resulting
@@ -3698,6 +3701,7 @@ class Kconfig(object):
         for choice in self.unique_choices:
             for sym in choice.syms:
                 sym._dependents.add(choice)
+                choice._dependents.add(sym)
 
     def _invalidate_all(self):
         # Undefined symbols never change value and don't need to be
@@ -3798,14 +3802,14 @@ class Kconfig(object):
     def _propagate_deps(self, node, visible_if):
         # Propagates 'node's dependencies to its child menu nodes
 
-        # If the parent node holds a Choice, we use the Choice itself as the
-        # parent dependency. This makes sense as the value (mode) of the choice
-        # limits the visibility of the contained choice symbols. The C
-        # implementation works the same way.
-        #
-        # Due to the similar interface, Choice works as a drop-in replacement
-        # for Symbol here.
-        basedep = node.item if node.item.__class__ is Choice else node.dep
+        # Always use the node's dependency expression as the base dependency
+        # for propagation.  For choices this means propagating the choice's
+        # 'depends on' condition (e.g. X86_32) -- not the Choice object --
+        # so that member visibility is determined by their own prompts gated
+        # by the choice's dependency, matching _menu_finalize() in
+        # scripts/kconfig/menu.c.  The choice mode only affects member
+        # values, handled separately in sym_calc_choice / _selection().
+        basedep = node.dep
 
         cur = node.list
         while cur:
@@ -4736,18 +4740,15 @@ class Symbol(object):
             if val == 1 and (self.type is BOOL or expr_value(self.weak_rev_dep) == 2):
                 val = 2
 
-        elif vis == 2:
-            # Visible choice symbol in y-mode choice. The choice mode limits
-            # the visibility of choice symbols, so it's sufficient to just
-            # check the visibility of the choice symbols themselves.
+        elif vis:
+            # Visible choice symbol.  sym_calc_choice() in
+            # scripts/kconfig/symbol.c (Linux) assigns yes/no to each
+            # visible member based on whether it is the selected symbol,
+            # regardless of the choice's mode (y or m).
             val = 2 if self.choice.selection is self else 0
             self._origin = (
                 self.choice._origin if self.choice.selection is self else None
             )
-
-        elif vis and self.user_value:
-            # Visible choice symbol in m-mode choice, with set non-0 user value
-            val = 1
 
         self._cached_tri_val = val
         return val
@@ -5129,11 +5130,15 @@ class Symbol(object):
         if not vis:
             return ()
 
+        # sym_calc_choice() in scripts/kconfig/symbol.c (Linux) assigns
+        # yes/no values to all visible choice members, so the only
+        # user-settable value is y (selecting the member).
+        if self.choice:
+            return (2,)
+
         rev_dep_val = expr_value(self.rev_dep)
 
         if vis == 2:
-            if self.choice:
-                return (2,)
 
             if not rev_dep_val:
                 if self.type is BOOL or expr_value(self.weak_rev_dep) == 2:
@@ -5755,18 +5760,47 @@ class Choice(object):
         # Worker function for the 'selection' attribute
 
         # Warning: See Symbol._rec_invalidate(), and note that this is a hidden
-        # function call (property magic)
-        if self.tri_value != 2:
-            # Not in y mode, so no selection
-            return None
+        # function call (property magic).  Accessing self.visibility ensures
+        # _cached_vis is set, which the invalidation system uses as the flag
+        # for "has cached values that need clearing".
+        self.visibility
 
-        # Use the user selection if it's visible
+        # sym_calc_choice() in scripts/kconfig/symbol.c (Linux) computes
+        # the selection for any choice that has visible members, regardless
+        # of the choice's own mode.  An invisible choice prompt (e.g. gated
+        # by EXPERT) does not prevent the default selection from being
+        # written to .config when the choice's dependency (e.g. X86_32)
+        # is met.
+
+        # Step 1: use the user selection if it's visible
         if self.user_selection and self.user_selection.visibility:
             self._origin = _T_CONFIG, self.user_loc
             return self.user_selection
 
-        # Otherwise, check if we have a default
-        return self._selection_from_defaults()
+        # Step 2: default (explicit or first visible member), but skip if
+        # the user explicitly set that symbol to n
+        res = self._selection_from_defaults()
+        if res is not None:
+            if res.user_value is not None and res.user_value == 0:
+                res = None
+
+        # Step 3: first visible member that the user hasn't touched
+        if res is None:
+            for sym in self.syms:
+                if sym.visibility and sym.user_value is None:
+                    self._origin = _T_DEFAULT, None
+                    res = sym
+                    break
+
+        # Step 4: last visible member (absolute fallback)
+        if res is None:
+            for sym in reversed(self.syms):
+                if sym.visibility:
+                    self._origin = _T_DEFAULT, None
+                    res = sym
+                    break
+
+        return res
 
     def _selection_from_defaults(self):
         # Check if we have a default
@@ -6666,18 +6700,10 @@ def _visibility(sc):
         if node.prompt:
             vis = max(vis, expr_value(node.prompt[1]))
 
-    if sc.__class__ is Symbol and sc.choice:
-        if (
-            sc.choice.orig_type is TRISTATE
-            and sc.orig_type is not TRISTATE
-            and sc.choice.tri_value != 2
-        ):
-            # Non-tristate choice symbols are only visible in y mode
-            return 0
-
-        if sc.orig_type is TRISTATE and vis == 1 and sc.choice.tri_value == 2:
-            # Choice symbols with m visibility are not visible in y mode
-            return 0
+    # For choice values, sym_calc_visibility() in scripts/kconfig/symbol.c
+    # (Linux) returns immediately after computing prompt visibility -- no
+    # additional capping based on the choice's mode.  The m-to-y promotion
+    # for non-tristate types still applies.
 
     # Promote m to y if we're dealing with a non-tristate (possibly due to
     # modules being disabled)

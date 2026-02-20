@@ -49,22 +49,12 @@ def test_visibility():
     verify_visibility(c.syms["BOOL_MENU_N"], 0, 0)
     verify_visibility(c.syms["BOOL_MENU_M"], 0, 2)
     verify_visibility(c.syms["BOOL_MENU_Y"], 2, 2)
-    verify_visibility(c.syms["BOOL_CHOICE_N"], 0, 0)
-
-    # Non-tristate symbols in tristate choices are only visible if the choice
-    # is in y mode
-
-    # The choice can't be brought to y mode because of the 'if m'
-    verify_visibility(c.syms["BOOL_CHOICE_M"], 0, 0)
-    c.syms["BOOL_CHOICE_M"].choice.set_value(2)
-    verify_visibility(c.syms["BOOL_CHOICE_M"], 0, 0)
-
-    # The choice gets y mode only when running without modules, because it
-    # defaults to m mode
-    verify_visibility(c.syms["BOOL_CHOICE_Y"], 2, 0)
-    c.syms["BOOL_CHOICE_Y"].choice.set_value(2)
-    # When set to y mode, the choice symbol becomes visible both with and
-    # without modules
+    # Choice member visibility is purely prompt-based (no choice-mode
+    # capping), matching sym_calc_visibility() in scripts/kconfig/symbol.c
+    # (Linux).  Members with unconditional prompts have visibility y
+    # regardless of the choice's mode or prompt condition.
+    verify_visibility(c.syms["BOOL_CHOICE_N"], 2, 2)
+    verify_visibility(c.syms["BOOL_CHOICE_M"], 2, 2)
     verify_visibility(c.syms["BOOL_CHOICE_Y"], 2, 2)
 
     verify_visibility(c.syms["TRISTATE_IF_N"], 0, 0)
@@ -73,8 +63,8 @@ def test_visibility():
     verify_visibility(c.syms["TRISTATE_MENU_N"], 0, 0)
     verify_visibility(c.syms["TRISTATE_MENU_M"], 0, 1)
     verify_visibility(c.syms["TRISTATE_MENU_Y"], 2, 2)
-    verify_visibility(c.syms["TRISTATE_CHOICE_N"], 0, 0)
-    verify_visibility(c.syms["TRISTATE_CHOICE_M"], 0, 1)
+    verify_visibility(c.syms["TRISTATE_CHOICE_N"], 2, 2)
+    verify_visibility(c.syms["TRISTATE_CHOICE_M"], 2, 2)
     verify_visibility(c.syms["TRISTATE_CHOICE_Y"], 2, 2)
 
     verify_visibility(c.named_choices["BOOL_CHOICE_N"], 0, 0)
@@ -186,15 +176,16 @@ def test_assignable():
     verify_assignable("Y_CHOICE_TRISTATE", (2,), (2,))
     verify_assignable("Y_CHOICE_N_VIS_TRISTATE", (), ())
 
-    # Symbols in m/y-mode choice, starting out in m mode, or y mode when
-    # running without modules
-    verify_assignable("MY_CHOICE_BOOL", (2,), ())
-    verify_assignable("MY_CHOICE_TRISTATE", (2,), (0, 1))
+    # Symbols in m/y-mode choice -- choice member assignable is always (2,)
+    # when visible, regardless of the choice's mode, matching
+    # sym_calc_choice() in scripts/kconfig/symbol.c (Linux).
+    verify_assignable("MY_CHOICE_BOOL", (2,), (2,))
+    verify_assignable("MY_CHOICE_TRISTATE", (2,), (2,))
     verify_assignable("MY_CHOICE_N_VIS_TRISTATE", (), ())
 
     c.named_choices["MY_CHOICE"].set_value(2)
 
-    # Symbols in m/y-mode choice, now in y mode
+    # Setting the choice to y mode doesn't change assignable values
     verify_assignable("MY_CHOICE_BOOL", (2,), (2,))
     verify_assignable("MY_CHOICE_TRISTATE", (2,), (2,))
     verify_assignable("MY_CHOICE_N_VIS_TRISTATE", (), ())

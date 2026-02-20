@@ -29,18 +29,13 @@ def main():
     # Assigning 0/1/2 to non-bool/tristate symbols has no effect (int/hex
     # symbols still take a string, because they preserve formatting).
     for sym in kconf.unique_defined_syms:
-        # Set choice symbols to 'm'. This value will be ignored for choices in
-        # 'y' mode (the "normal" mode), which will instead just get their
-        # default selection, but will set all symbols in m-mode choices to 'm',
-        # which is as high as they can go.
-        #
-        # Here's a convoluted example of how you might get an m-mode choice
-        # even during allyesconfig:
-        #
-        #   choice
-        #           tristate "weird choice"
-        #           depends on m
-        sym.set_value(1 if sym.choice else 2)
+        # Skip choice member symbols -- conf_set_all_new_symbols() in
+        # scripts/kconfig/conf.c (Linux) never sets SYMBOL_DEF_USER on
+        # choice values, leaving the choice selection logic to pick the
+        # default.
+        if sym.choice:
+            continue
+        sym.set_value(2)
 
     # Set all choices to the highest possible mode
     for choice in kconf.unique_choices:

@@ -34,6 +34,12 @@ def main():
     kconf.warn = False
     try:
         for sym in kconf.unique_defined_syms:
+            # Skip choice member symbols -- conf_set_all_new_symbols() in
+            # scripts/kconfig/conf.c (Linux) never sets SYMBOL_DEF_USER on
+            # choice values, leaving the choice selection logic to pick the
+            # default.
+            if sym.choice:
+                continue
             sym.set_value(2 if sym.is_allnoconfig_y else 0)
     finally:
         kconf.warn = True

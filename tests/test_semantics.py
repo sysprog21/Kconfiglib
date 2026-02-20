@@ -204,14 +204,27 @@ def test_choice_m_mode():
         tristate.tri_value == 1
     ), "TRISTATE choice should have mode m after explicit mode assignment"
 
-    assign_and_verify_value(c, "T_1", 0, 0)
-    assign_and_verify_value(c, "T_2", 0, 0)
-    assign_and_verify_value(c, "T_1", 1, 1)
-    assign_and_verify_value(c, "T_2", 1, 1)
-    assign_and_verify_value(c, "T_1", 2, 1)
-    assign_and_verify_value(c, "T_2", 2, 1)
+    # In v6.18, sym_calc_choice() in scripts/kconfig/symbol.c (Linux)
+    # always assigns y/n to visible members based on selection, regardless
+    # of the choice's mode.  Setting a member to n (0) removes it from
+    # default selection consideration; setting to y (2) makes it the user
+    # selection.
 
-    # Switching to y mode should cause T_2 to become selected
+    # Setting T_1 to n moves selection to T_2
+    assign_and_verify_value(c, "T_1", 0, 0)
+    # T_2 is now selected; setting it to n triggers step-4 fallback
+    # (last visible member = T_2), so T_2 stays y
+    assign_and_verify_value(c, "T_2", 0, 2)
+    # Setting T_1 to y makes it the user selection
+    c.syms["T_1"].set_value(2)
+    verify_value(c, "T_1", 2)
+    verify_value(c, "T_2", 0)
+    # Setting T_2 to y makes it the user selection
+    c.syms["T_2"].set_value(2)
+    verify_value(c, "T_1", 0)
+    verify_value(c, "T_2", 2)
+
+    # Switching to y mode keeps T_2 as the user selection
     tristate.set_value(2)
     verify_value(c, "T_1", 0)
     verify_value(c, "T_2", 2)
@@ -279,3 +292,44 @@ def test_choice_weird_symbols():
     verify_is_weird_choice_symbol("WS7")
     verify_is_weird_choice_symbol("WS8")
     verify_is_normal_choice_symbol("WS9")
+
+
+def test_choice_optional_n_mode_selection():
+    """Test that optional choices in n mode still compute a selection.
+
+    In Linux's sym_calc_choice() (scripts/kconfig/symbol.c), the selection
+    is computed for any choice with visible members regardless of the
+    choice's own mode.  An optional choice with no user value has mode n,
+    but visible members are still assigned y/n based on which one is
+    selected (the default or first visible member).
+    """
+    c = Kconfig("tests/Kchoice", warn=False)
+
+    # BOOL_OPT and TRISTATE_OPT are optional, default mode is n (no user
+    # value, is_optional means base reverse dep is 0)
+    for choice_name, member_prefix in [("BOOL_OPT", "BO_"), ("TRISTATE_OPT", "TO_")]:
+        choice = c.named_choices[choice_name]
+        assert choice.is_optional, f"{choice_name} should be optional"
+        assert choice.tri_value == 0, f"{choice_name} should have mode n"
+
+        # sym_calc_choice() picks a selection even in n mode
+        assert (
+            choice.selection is not None
+        ), f"{choice_name} should still have a selection in n mode"
+
+        # First visible member is selected (gets y), others get n
+        first_sym = c.syms[member_prefix + "1"]
+        assert (
+            choice.selection is first_sym
+        ), f"{choice_name} selection should be {first_sym.name}"
+        assert first_sym.tri_value == 2, f"{first_sym.name} should be y (selected)"
+
+        second_sym = c.syms[member_prefix + "2"]
+        assert (
+            second_sym.tri_value == 0
+        ), f"{second_sym.name} should be n (not selected)"
+
+        # All visible members have _write_to_conf set (SYMBOL_WRITE)
+        for sym in choice.syms:
+            if sym.visibility:
+                assert sym._write_to_conf, f"{sym.name} should have _write_to_conf set"
