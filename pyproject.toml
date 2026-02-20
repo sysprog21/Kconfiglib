@@ -1,0 +1,49 @@
+[tool.ruff]
+# Project supports >=3.6, but Ruff's minimum target is py37.
+# No py37-only syntax is introduced by the enabled rules.
+target-version = "py37"
+# Lint installable modules and dev tools; skip non-shipping directories
+extend-exclude = ["examples", "tests", ".ci", "externals"]
+
+[tool.ruff.lint]
+# Enable rule categories for genuine code quality checks
+select = [
+    "F",      # Pyflakes: unused imports/variables, undefined names
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade: Python version upgrades (object inheritance, super(), f-strings)
+    "B",      # flake8-bugbear: common bugs (mutable defaults, raise-without-from)
+    "A",      # flake8-builtins: shadowing builtins
+    "PLE",    # pylint errors (0 current hits, free safety net)
+    "PLW",    # pylint warnings (unnecessary-lambda, global-variable-not-assigned)
+    "PLR1714",# pylint refactor: repeated-equality-comparison (consider-using-in)
+    "PLR1730",# pylint refactor: if-stmt-min-max (consider-using-max-builtin)
+    "PLR0402",# pylint refactor: manual-from-import (consider-using-from-import)
+    "BLE",    # flake8-blind-except: catch blind Exception
+    "S102",   # flake8-bandit: exec builtin
+    "S110",   # flake8-bandit: try-except-pass
+    "S301",   # flake8-bandit: pickle usage
+    "S307",   # flake8-bandit: eval usage
+    "S602",   # flake8-bandit: subprocess shell=True
+    "SIM115", # flake8-simplify: context manager for open()
+]
+ignore = [
+    # Line length handled by black formatter (enforced in CI)
+    "E501",   # line-too-long
+]
+
+[tool.ruff.lint.per-file-ignores]
+# kconfiglib: type/format as API params, parser loop reassignment is intentional,
+# shell=True required for $(shell) expansion, defensive except-Exception in
+# subprocess/tmpdir cleanup
+"kconfiglib.py" = ["A001", "PLW2901", "S602", "BLE001", "S110"]
+# menuconfig: module-level globals, conditional imports, global-statement,
+# defensive except-Exception in terminal shadow/suspend ops
+"menuconfig.py" = ["PLW0602", "E402", "PLW0603", "BLE001", "S110"]
+# guiconfig: tkinter wildcard imports, module-level globals, global-statement,
+# outer loop variable reuse in menu population
+"guiconfig.py" = ["F403", "F405", "PLW0602", "PLW0603", "PLW2901"]
+# lint: global-statement, defensive except-Exception for git grep fallback
+"lint.py" = ["PLW0603", "BLE001", "S110"]
+# oldconfig: global-statement for conf_changed flag
+"oldconfig.py" = ["PLW0603"]

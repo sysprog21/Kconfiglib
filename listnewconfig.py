@@ -55,9 +55,7 @@ def main():
             # to show n-valued symbols as 'CONFIG_FOO=n' instead of
             # '# CONFIG_FOO is not set'. This matches the C tools.
             if sym.orig_type in (BOOL, TRISTATE):
-                s = "{}{}={}\n".format(
-                    kconf.config_prefix, sym.name, TRI_TO_STR[sym.tri_value]
-                )
+                s = f"{kconf.config_prefix}{sym.name}={TRI_TO_STR[sym.tri_value]}\n"
             else:
                 s = sym.config_string
 

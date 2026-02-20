@@ -35,7 +35,6 @@ _IS_WINDOWS = os.name == "nt"
 if not _IS_WINDOWS:
     import select
     import termios
-    import tty
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +94,9 @@ class Color:
                 return str(30 + idx)
             return str(90 + idx - 8)
         if self._kind == "index":
-            return "38;5;{}".format(self._value)
+            return f"38;5;{self._value}"
         r, g, b = self._value
-        return "38;2;{};{};{}".format(r, g, b)
+        return f"38;2;{r};{g};{b}"
 
     def _sgr_bg(self):
         """Return SGR escape for background."""
@@ -109,9 +108,9 @@ class Color:
                 return str(40 + idx)
             return str(100 + idx - 8)
         if self._kind == "index":
-            return "48;5;{}".format(self._value)
+            return f"48;5;{self._value}"
         r, g, b = self._value
-        return "48;2;{};{};{}".format(r, g, b)
+        return f"48;2;{r};{g};{b}"
 
     def __eq__(self, other):
         if not isinstance(other, Color):
@@ -128,11 +127,9 @@ class Color:
         if self._kind == "default":
             return "Color.DEFAULT"
         if self._kind == "named":
-            return Color._NAMED_REPRS.get(
-                self._value, "Color('named', {})".format(self._value)
-            )
+            return Color._NAMED_REPRS.get(self._value, f"Color('named', {self._value})")
         if self._kind == "index":
-            return "Color.index({})".format(self._value)
+            return f"Color.index({self._value})"
         return "Color.rgb({},{},{})".format(*self._value)
 
 
@@ -251,9 +248,9 @@ class Style:
     def __repr__(self):
         parts = []
         if self.fg != Color.DEFAULT:
-            parts.append("fg={}".format(self.fg))
+            parts.append(f"fg={self.fg}")
         if self.bg != Color.DEFAULT:
-            parts.append("bg={}".format(self.bg))
+            parts.append(f"bg={self.bg}")
         if self.bold:
             parts.append("bold")
         if self.standout:
@@ -860,7 +857,7 @@ class Terminal:
 
                 # Move cursor if not contiguous
                 if row != last_row or col != last_col:
-                    buf.append("\x1b[{};{}H".format(row + 1, col + 1))
+                    buf.append(f"\x1b[{row + 1};{col + 1}H")
 
                 # Set style if changed
                 if style != last_style:
@@ -881,7 +878,7 @@ class Terminal:
             r = self._cursor_region
             abs_y = r._y + self._cursor_y
             abs_x = r._x + self._cursor_x
-            buf.append("\x1b[{};{}H".format(abs_y + 1, abs_x + 1))
+            buf.append(f"\x1b[{abs_y + 1};{abs_x + 1}H")
             if self._cursor_very_visible:
                 buf.append("\x1b[?12;25h")  # blink + show
             else:

@@ -46,7 +46,7 @@ def name_and_locs(sym):
 
     return "{:40} {}".format(
         sym.name,
-        ", ".join("{0.filename}:{0.linenr}".format(node) for node in sym.nodes),
+        ", ".join(f"{node.filename}:{node.linenr}" for node in sym.nodes),
     )
 
 
@@ -114,22 +114,22 @@ def run(cmd, cwd=None, check=True):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd
         )
     except OSError as e:
-        err("Failed to run '{}': {}".format(cmd_s, e))
+        err(f"Failed to run '{cmd_s}': {e}")
 
     stdout, stderr = process.communicate()
     stdout = stdout.decode("utf-8", errors="ignore")
     stderr = stderr.decode("utf-8")
     if check and process.returncode:
-        err("""\
-'{}' exited with status {}.
+        err(f"""\
+'{cmd_s}' exited with status {process.returncode}.
 
 ===stdout===
-{}
+{stdout}
 ===stderr===
-{}""".format(cmd_s, process.returncode, stdout, stderr))
+{stderr}""")
 
     if stderr:
-        warn("'{}' wrote to stderr:\n{}".format(cmd_s, stderr))
+        warn(f"'{cmd_s}' wrote to stderr:\n{stderr}")
 
     return stdout
 
@@ -164,7 +164,7 @@ def referenced_outside_kconfig(search_dirs):
                 # pretty recently (2018)
                 for match in re.findall(regex, line):
                     res.add(match[7:])  # Strip "CONFIG_"
-        except:
+        except Exception:
             # If git grep fails (not a git repo, etc.), skip this directory
             pass
 
@@ -196,7 +196,7 @@ def check_unused(search_dirs, print_separator):
 
 def check_pointless_menuconfigs(print_separator):
     results = [
-        "{0.item.name:40} {0.filename}:{0.linenr}".format(node)
+        f"{node.item.name:40} {node.filename}:{node.linenr}"
         for node in kconf.node_iter()
         if node.is_menuconfig
         and not node.list
@@ -242,7 +242,7 @@ def check_missing_config_prefix(search_dirs, print_separator):
                 ("git", "grep", "--extended-regexp", regex), cwd=search_dir, check=False
             )
             defined.update(re.findall(regex, defines))
-        except:
+        except Exception:
             pass
 
     # Filter out symbols whose names are #define'd too. Preserve definition
@@ -270,7 +270,7 @@ def check_missing_config_prefix(search_dirs, print_separator):
                 output = run(cmd, cwd=search_dir, check=False)
                 if output:
                     results.append(output)
-            except:
+            except Exception:
                 pass
 
     return print_results(
@@ -398,14 +398,14 @@ def main():
 
     # Load Kconfig
     if not os.path.exists(args.kconfig):
-        err("Kconfig file '{}' not found".format(args.kconfig))
+        err(f"Kconfig file '{args.kconfig}' not found")
 
     try:
         kconf = kconfiglib.Kconfig(
             args.kconfig, warn_to_stderr=False, suppress_traceback=True
         )
     except Exception as e:
-        err("Failed to load Kconfig: {}".format(e))
+        err(f"Failed to load Kconfig: {e}")
 
     # Run all checks if none were specified on the command line
     check_names = args.checks or [

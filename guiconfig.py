@@ -62,8 +62,8 @@ import os
 import re
 
 from tkinter import *
-import tkinter.ttk as ttk
-import tkinter.font as font
+from tkinter import ttk
+from tkinter import font
 from tkinter import filedialog, messagebox
 
 from kconfiglib import (
@@ -378,6 +378,10 @@ def menuconfig(kconf):
 
     _kconf = kconf
 
+    # Clear cached node lists so they rebuild for the new Kconfig instance
+    _cached_sc_nodes.clear()
+    _cached_menu_comment_nodes.clear()
+
     _jump_to_tree = None
     _tree_row_index = 0
     _search_after_id = None
@@ -433,10 +437,7 @@ def menuconfig(kconf):
 
     # Center the window
     _root.geometry(
-        "+{}+{}".format(
-            (_root.winfo_screenwidth() - _root.winfo_reqwidth()) // 2,
-            (_root.winfo_screenheight() - _root.winfo_reqheight()) // 2,
-        )
+        f"+{(_root.winfo_screenwidth() - _root.winfo_reqwidth()) // 2}+{(_root.winfo_screenheight() - _root.winfo_reqheight()) // 2}"
     )
 
     # Show it
@@ -540,7 +541,7 @@ def _load_images():
     # keep it alive.
 
     def load_image(name, data):
-        var_name = "_{}_img".format(name)
+        var_name = f"_{name}_img"
 
         if _USE_EMBEDDED_IMAGES:
             globals()[var_name] = PhotoImage(data=data, format="gif")
@@ -643,7 +644,7 @@ def _fix_treeview_issues():
                     for elm in style.map("Treeview", query_opt=option)
                     if elm[:2] != ("!disabled", "!selected")
                 ]
-            }
+            },
         )
 
 
@@ -1043,7 +1044,7 @@ def _update_stats():
     changed_syms = sum(
         1 for sym in _kconf.unique_defined_syms if sym.user_value is not None
     )
-    _stats_label["text"] = "Symbols: {} | Changed: {}".format(total_syms, changed_syms)
+    _stats_label["text"] = f"Symbols: {total_syms} | Changed: {changed_syms}"
 
 
 def _set_conf_changed(changed):
@@ -1248,9 +1249,9 @@ def _get_force_info(sym):
     # Show up to 2 symbols to keep line length reasonable
     shown = ", ".join(sym_names[:2])
     if len(sym_names) > 2:
-        shown += ", +{}".format(len(sym_names) - 2)
+        shown += f", +{len(sym_names) - 2}"
 
-    return " [{} {}]".format(prefix, shown)
+    return f" [{prefix} {shown}]"
 
 
 def _node_str(node):
@@ -1258,7 +1259,7 @@ def _node_str(node):
 
     if node.prompt:
         if node.item == COMMENT:
-            s = "*** {} ***".format(node.prompt[0])
+            s = f"*** {node.prompt[0]} ***"
         else:
             s = node.prompt[0]
 
@@ -1283,7 +1284,7 @@ def _node_str(node):
 
     elif isinstance(node.item, Symbol):
         # Symbol without prompt (can show up in show-all)
-        s = "<{}>".format(node.item.name)
+        s = f"<{node.item.name}>"
 
     else:
         # Choice without prompt. Use standard_sc_expr_str() so that it shows up
@@ -1295,7 +1296,7 @@ def _node_str(node):
         if sym.orig_type == STRING:
             s += ": " + sym.str_value
         elif sym.orig_type in (INT, HEX):
-            s = "({}) {}".format(sym.str_value, s)
+            s = f"({sym.str_value}) {s}"
 
     elif isinstance(node.item, Choice) and node.item.tri_value == 2:
         # Print the prompt of the selected symbol after the choice for
@@ -1306,7 +1307,7 @@ def _node_str(node):
             # fall back to whatever prompt we can find for the symbol
             prompt = _choice_sym_prompt(sym, node)
             if prompt:
-                s += " ({})".format(prompt)
+                s += f" ({prompt})"
 
     # In single-menu mode, print "--->" next to nodes that have menus that can
     # potentially be entered. Print "----" if the menu is empty. We don't allow
@@ -1684,7 +1685,7 @@ def _set_val_dialog(node, parent):
     sym = node.item
 
     dialog = Toplevel(parent)
-    dialog.title("Enter {} value".format(TYPE_TO_STR[sym.type]))
+    dialog.title(f"Enter {TYPE_TO_STR[sym.type]} value")
     dialog.resizable(False, False)
     dialog.transient(parent)
     dialog.protocol("WM_DELETE_WINDOW", cancel)
@@ -1770,7 +1771,7 @@ def _center_on_root(dialog):
     x = max(0, min(x, screen_width - dialog_width))
     y = max(0, min(y, screen_height - dialog_height))
 
-    dialog.geometry("+{}+{}".format(x, y))
+    dialog.geometry(f"+{x}+{y}")
 
     dialog.deiconify()
 
@@ -1789,7 +1790,7 @@ def _check_valid(dialog, entry, sym, s):
     except ValueError:
         messagebox.showerror(
             "Bad value",
-            "'{}' is a malformed {} value".format(s, TYPE_TO_STR[sym.orig_type]),
+            f"'{s}' is a malformed {TYPE_TO_STR[sym.orig_type]} value",
             parent=dialog,
         )
         entry.focus_set()
@@ -1803,7 +1804,7 @@ def _check_valid(dialog, entry, sym, s):
             if not int(low_s, base) <= int(s, base) <= int(high_s, base):
                 messagebox.showerror(
                     "Value out of range",
-                    "{} is outside the range {}-{}".format(s, low_s, high_s),
+                    f"{s} is outside the range {low_s}-{high_s}",
                     parent=dialog,
                 )
                 entry.focus_set()
@@ -1821,7 +1822,7 @@ def _range_info(sym):
     if sym.orig_type in (INT, HEX):
         for low, high, cond, _ in sym.ranges:
             if expr_value(cond):
-                return "Range: {}-{}".format(low.str_value, high.str_value)
+                return f"Range: {low.str_value}-{high.str_value}"
 
     return None
 
@@ -2155,9 +2156,9 @@ def _vis_after(item):
         if not _tree.tag_has("invisible", item):
             return item
 
-        next = _tree.next(item)
-        if next:
-            item = next
+        next_item = _tree.next(item)
+        if next_item:
+            item = next_item
         else:
             item = _tree.parent(item)
             if not item:
@@ -2173,7 +2174,7 @@ def _on_quit(_=None):
     config_exists = os.path.exists(_conf_filename)
 
     if not _conf_changed and config_exists:
-        _quit("No changes to save (for '{}')".format(_conf_filename))
+        _quit(f"No changes to save (for '{_conf_filename}')")
         return
 
     # Adjust dialog message if .config doesn't exist
@@ -2192,7 +2193,7 @@ def _on_quit(_=None):
         if not ync:
             msg = "Configuration was not saved"
             if config_exists:
-                msg = "Configuration ({}) was not saved".format(_conf_filename)
+                msg = f"Configuration ({_conf_filename}) was not saved"
             _quit(msg)
             return
 
@@ -2228,15 +2229,10 @@ def _try_save(save_fn, filename, description):
         _set_status(msg)
         print(msg)
         return True
-    except EnvironmentError as e:
+    except OSError as e:
         messagebox.showerror(
             "Error saving " + description,
-            "Error saving {} to '{}': {} (errno: {})".format(
-                description,
-                e.filename,
-                e.strerror,
-                errno.errorcode.get(e.errno, e.errno),
-            ),
+            f"Error saving {description} to '{e.filename}': {e.strerror} (errno: {errno.errorcode.get(e.errno, e.errno)})",
         )
         return False
 
@@ -2253,12 +2249,10 @@ def _try_load(filename):
         _set_status(msg)
         print(msg)
         return True
-    except EnvironmentError as e:
+    except OSError as e:
         messagebox.showerror(
             "Error loading configuration",
-            "Error loading '{}': {} (errno: {})".format(
-                filename, e.strerror, errno.errorcode.get(e.errno, e.errno)
-            ),
+            f"Error loading '{filename}': {e.strerror} (errno: {errno.errorcode.get(e.errno, e.errno)})",
         )
         return False
 
@@ -2293,7 +2287,7 @@ def _jump_to_dialog(_=None):
 
         # Schedule a new search after a short delay (150ms)
         # This provides responsive feedback while avoiding excessive updates
-        _search_after_id = dialog.after(150, lambda: search())
+        _search_after_id = dialog.after(150, search)
 
     def jump_to_selected(event=None):
         # Jumps to the selected node and closes the dialog
@@ -2324,7 +2318,7 @@ def _jump_to_dialog(_=None):
         jumpto_button["state"] = "normal" if tree.selection() else "disabled"
 
     dialog = Toplevel(_root)
-    dialog.geometry("+{}+{}".format(_root.winfo_rootx() + 50, _root.winfo_rooty() + 50))
+    dialog.geometry(f"+{_root.winfo_rootx() + 50}+{_root.winfo_rooty() + 50}")
     dialog.title("Jump to symbol/choice/menu/comment")
     dialog.minsize(128, 128)  # See _create_ui()
     dialog.transient(_root)
@@ -2512,44 +2506,49 @@ def _jump_to(node):
     _select(_tree, id(node))
 
 
-# Obscure Python: We never pass a value for cached_nodes, and it keeps pointing
-# to the same list. This avoids a global.
-def _sorted_sc_nodes(cached_nodes=[]):
+_cached_sc_nodes = []
+
+
+def _sorted_sc_nodes():
     # Returns a sorted list of symbol and choice nodes to search. The symbol
     # nodes appear first, sorted by name, and then the choice nodes, sorted by
     # prompt and (secondarily) name.
 
-    if not cached_nodes:
+    if not _cached_sc_nodes:
         # Add symbol nodes
         for sym in sorted(_kconf.unique_defined_syms, key=lambda sym: sym.name):
-            # += is in-place for lists
-            cached_nodes += sym.nodes
+            _cached_sc_nodes.extend(sym.nodes)
 
         # Add choice nodes
 
         choices = sorted(_kconf.unique_choices, key=lambda choice: choice.name or "")
 
-        cached_nodes += sorted(
-            [node for choice in choices for node in choice.nodes],
-            key=lambda node: node.prompt[0] if node.prompt else "",
+        _cached_sc_nodes.extend(
+            sorted(
+                [node for choice in choices for node in choice.nodes],
+                key=lambda node: node.prompt[0] if node.prompt else "",
+            )
         )
 
-    return cached_nodes
+    return _cached_sc_nodes
 
 
-def _sorted_menu_comment_nodes(cached_nodes=[]):
+_cached_menu_comment_nodes = []
+
+
+def _sorted_menu_comment_nodes():
     # Returns a list of menu and comment nodes to search, sorted by prompt,
     # with the menus first
 
-    if not cached_nodes:
+    if not _cached_menu_comment_nodes:
 
         def prompt_text(mc):
             return mc.prompt[0]
 
-        cached_nodes += sorted(_kconf.menus, key=prompt_text)
-        cached_nodes += sorted(_kconf.comments, key=prompt_text)
+        _cached_menu_comment_nodes.extend(sorted(_kconf.menus, key=prompt_text))
+        _cached_menu_comment_nodes.extend(sorted(_kconf.comments, key=prompt_text))
 
-    return cached_nodes
+    return _cached_menu_comment_nodes
 
 
 def _load_parents(node):
@@ -2623,7 +2622,7 @@ def _info_str(node):
         return (
             _name_info(choice)
             + _help_info(choice)
-            + "Mode: {}\n\n".format(choice.str_value)
+            + f"Mode: {choice.str_value}\n\n"
             + _choice_syms_info(choice)
             + _direct_dep_info(choice)
             + _defaults_info(choice)
@@ -2646,7 +2645,7 @@ def _value_info(sym):
 
     # Only put quotes around the value for string symbols
     s = "Value: {}\n".format(
-        '"{}"'.format(sym.str_value) if sym.orig_type == STRING else sym.str_value
+        f'"{sym.str_value}"' if sym.orig_type == STRING else sym.str_value
     )
 
     # Add origin information to explain where the value comes from
@@ -2702,9 +2701,7 @@ def _direct_dep_info(sc):
     if sc.direct_dep is _kconf.y:
         return ""
 
-    return "Direct dependencies (={}):\n{}\n".format(
-        TRI_TO_STR[expr_value(sc.direct_dep)], _split_expr_info(sc.direct_dep, 2)
-    )
+    return f"Direct dependencies (={TRI_TO_STR[expr_value(sc.direct_dep)]}):\n{_split_expr_info(sc.direct_dep, 2)}\n"
 
 
 def _defaults_info(sc):
@@ -2726,7 +2723,7 @@ def _defaults_info(sc):
             # This also avoids showing the tristate value for string/int/hex
             # defaults, which wouldn't make any sense.
             if isinstance(val, tuple):
-                s += "  (={})".format(TRI_TO_STR[expr_value(val)])
+                s += f"  (={TRI_TO_STR[expr_value(val)]})"
         else:
             # Don't print the value next to the symbol name for choice
             # defaults, as it looks a bit confusing
@@ -2734,9 +2731,7 @@ def _defaults_info(sc):
         s += "\n"
 
         if cond is not _kconf.y:
-            s += "    Condition (={}):\n{}".format(
-                TRI_TO_STR[expr_value(cond)], _split_expr_info(cond, 4)
-            )
+            s += f"    Condition (={TRI_TO_STR[expr_value(cond)]}):\n{_split_expr_info(cond, 4)}"
 
     return s + "\n"
 
@@ -2764,7 +2759,7 @@ def _split_expr_info(expr, indent):
         # Don't bother showing the value hint if the expression is just a
         # single symbol. _expr_str() already shows its value.
         if isinstance(term, tuple):
-            s += "  (={})".format(TRI_TO_STR[expr_value(term)])
+            s += f"  (={TRI_TO_STR[expr_value(term)]})"
 
         s += "\n"
 
@@ -2784,7 +2779,7 @@ def _select_imply_info(sym):
 
         res = title
         for si in sis:
-            res += "  - {}\n".format(split_expr(si, AND)[0].name)
+            res += f"  - {split_expr(si, AND)[0].name}\n"
         return res + "\n"
 
     s = ""
@@ -2799,9 +2794,7 @@ def _select_imply_info(sym):
                 s += sis(
                     dep,
                     val,
-                    "Symbols currently {}{} this symbol{}:\n".format(
-                        prefix, verb, suffix
-                    ),
+                    f"Symbols currently {prefix}{verb} this symbol{suffix}:\n",
                 )
 
     return s
@@ -2821,16 +2814,10 @@ def _kconfig_def_info(item):
     for node in nodes:
         s += (
             "\n\n"
-            "At {}:{}\n"
-            "{}"
-            "Menu path: {}\n\n"
-            "{}".format(
-                node.filename,
-                node.linenr,
-                _include_path_info(node),
-                _menu_path_info(node),
-                node.custom_str(_name_and_val_str),
-            )
+            f"At {node.filename}:{node.linenr}\n"
+            f"{_include_path_info(node)}"
+            f"Menu path: {_menu_path_info(node)}\n\n"
+            f"{node.custom_str(_name_and_val_str)}"
         )
 
     return s
@@ -2842,9 +2829,7 @@ def _include_path_info(node):
         return ""
 
     return "Included via {}\n".format(
-        " -> ".join(
-            "{}:{}".format(filename, linenr) for filename, linenr in node.include_path
-        )
+        " -> ".join(f"{filename}:{linenr}" for filename, linenr in node.include_path)
     )
 
 
@@ -2878,9 +2863,9 @@ def _name_and_val_str(sc):
     if isinstance(sc, Symbol) and not sc.is_constant and not _is_num(sc.name):
         if not sc.nodes:
             # Undefined symbol reference
-            return "{}(undefined/n)".format(sc.name)
+            return f"{sc.name}(undefined/n)"
 
-        return "{}(={})".format(sc.name, sc.str_value)
+        return f"{sc.name}(={sc.str_value})"
 
     # For other items, use the standard format
     return standard_sc_expr_str(sc)
