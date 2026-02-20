@@ -2420,8 +2420,14 @@ def _jump_to_dialog():
                     # matches anywhere in the string.
                     #
                     # It's not horrible either way. Just a bit smoother.
+                    prefix = _kconf.config_prefix.lower()
+                    prefix_len = len(prefix)
+
                     regex_searches = [
-                        re.compile(regex).search for regex in s.lower().split()
+                        re.compile(
+                            token[prefix_len:] if token.startswith(prefix) else token
+                        ).search
+                        for token in s.lower().split()
                     ]
 
                     # No exception thrown, so the regexes are okay

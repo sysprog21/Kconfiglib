@@ -2401,8 +2401,12 @@ def _update_jump_to_matches(msglabel, search_string):
         # faster for regexes like '.*debug$' (though the '.*' is redundant
         # there). Those probably have bad interactions with re.search(), which
         # matches anywhere in the string.
+        prefix = _kconf.config_prefix.lower()
+        prefix_len = len(prefix)
+
         regex_searches = [
-            re.compile(regex).search for regex in search_string.lower().split()
+            re.compile(token[prefix_len:] if token.startswith(prefix) else token).search
+            for token in search_string.lower().split()
         ]
     except re.error as e:
         msg = "Bad regular expression"
