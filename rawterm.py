@@ -342,10 +342,7 @@ def _char_width(ch):
 
 def _str_width(s):
     """Return the display width of a string in terminal cells."""
-    w = 0
-    for ch in s:
-        w += _char_width(ch)
-    return w
+    return sum(_char_width(ch) for ch in s)
 
 
 # ---------------------------------------------------------------------------
@@ -473,8 +470,7 @@ class Region:
         self._fill_style = style
         cell = (" ", style)
         for row in self._cells:
-            for j in range(len(row)):
-                row[j] = cell
+            row[:] = [cell] * len(row)
         self._dirty = True
 
     def write(self, y, x, text, style=None, max_len=None):
@@ -567,6 +563,11 @@ class Terminal:
         self._resize_pending = False
         self._prev_frame = None  # Previous frame for diffing
 
+        # Escape sequence parser state (shared by Unix and Windows VT paths)
+        self._esc_buf = []
+        self._esc_node = None
+        self._pending_key = None
+
         # Query initial terminal size
         sz = shutil.get_terminal_size()
         self._width = sz.columns
@@ -584,11 +585,10 @@ class Terminal:
         self._write_raw("\x1b[?25l")
         self._flush()
 
-    def _init_unix(self):
-        """Set up Unix terminal: cbreak mode, SIGWINCH."""
+    @staticmethod
+    def _set_cbreak():
+        """Apply cbreak terminal settings: no echo, no canonical mode."""
         fd = sys.stdin.fileno()
-        self._old_termios = termios.tcgetattr(fd)
-
         new = termios.tcgetattr(fd)
         # LFLAG: clear ICANON, ECHO, IEXTEN; keep ISIG for Ctrl-C
         new[3] &= ~(termios.ICANON | termios.ECHO | termios.IEXTEN)
@@ -601,13 +601,13 @@ class Terminal:
         new[6][termios.VTIME] = 0
         termios.tcsetattr(fd, termios.TCSANOW, new)
 
+    def _init_unix(self):
+        """Set up Unix terminal: cbreak mode, SIGWINCH."""
+        self._old_termios = termios.tcgetattr(sys.stdin.fileno())
+        self._set_cbreak()
+
         # UTF-8 incremental decoder for input
         self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
-
-        # Escape sequence parser state
-        self._esc_buf = []
-        self._esc_node = None
-        self._pending_key = None
 
         # SIGWINCH handler
         self._old_sigwinch = signal.getsignal(signal.SIGWINCH)
@@ -650,9 +650,6 @@ class Terminal:
         if kernel32.SetConsoleMode(self._stdin_handle, new_in):
             self._win_vt_input = True
             self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
-            self._esc_buf = []
-            self._esc_node = None
-            self._pending_key = None
         else:
             # Fall back to ReadConsoleInputW
             new_in = self._old_in_mode.value & ~(0x0004 | 0x0002 | 0x0001)
@@ -725,19 +722,7 @@ class Terminal:
     def resume(self):
         """Re-enter terminal mode after suspend."""
         if not _IS_WINDOWS:
-            fd = sys.stdin.fileno()
-            new = termios.tcgetattr(fd)
-            new[3] &= ~(termios.ICANON | termios.ECHO | termios.IEXTEN)
-            new[1] &= ~(
-                termios.IXON
-                | termios.IXOFF
-                | termios.ICRNL
-                | termios.INLCR
-                | termios.IGNCR
-            )
-            new[6][termios.VMIN] = 1
-            new[6][termios.VTIME] = 0
-            termios.tcsetattr(fd, termios.TCSANOW, new)
+            self._set_cbreak()
 
         # Re-enter alternate screen
         self._write_raw("\x1b[?1049h")
@@ -826,18 +811,18 @@ class Terminal:
         # Painter's algorithm: paint regions in order (later = on top)
         for region in self._regions:
             ry, rx = region._y, region._x
-            rh, rw = region._height, region._width
-            for row in range(rh):
-                screen_row = ry + row
-                if screen_row < 0 or screen_row >= h:
-                    continue
-                for col in range(rw):
-                    screen_col = rx + col
-                    if screen_col < 0 or screen_col >= w:
-                        continue
-                    cell = region._cells[row][col]
+            # Clamp visible row/col ranges to screen bounds
+            row_start = max(0, -ry)
+            row_end = min(region._height, h - ry)
+            col_start = max(0, -rx)
+            col_end = min(region._width, w - rx)
+            for row in range(row_start, row_end):
+                frame_row = frame[ry + row]
+                region_row = region._cells[row]
+                for col in range(col_start, col_end):
+                    cell = region_row[col]
                     if cell[0] != "":  # skip wide-char placeholders
-                        frame[screen_row][screen_col] = cell
+                        frame_row[rx + col] = cell
 
         # Diff against previous frame and emit changes
         buf = []
@@ -864,11 +849,7 @@ class Terminal:
                     buf.append(style.sgr())
                     last_style = style
 
-                if ch:
-                    buf.append(ch)
-                else:
-                    buf.append(" ")
-
+                buf.append(ch or " ")
                 cw = _char_width(ch) if ch else 1
                 last_row = row
                 last_col = col + cw
@@ -1021,6 +1002,7 @@ class Terminal:
     def _read_key_windows_vt(self):
         """Windows VT100 input mode -- reuse Unix escape parser."""
         import msvcrt
+        import time
 
         while True:
             if msvcrt.kbhit():
@@ -1036,8 +1018,6 @@ class Terminal:
                 if self._check_resize():
                     return Key.RESIZE
                 # Small sleep to avoid busy-wait
-                import time
-
                 time.sleep(0.01)
 
     def _read_key_windows_console(self):
