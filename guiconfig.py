@@ -272,10 +272,15 @@ class ThemeManager:
             _tree.tag_configure("oddrow", background=c["tree_oddrow"])
             _tree.tag_configure("evenrow", background=c["tree_evenrow"])
 
-        # Update description Text widget colors
-        global _desc_text
-        if _desc_text:
-            _desc_text.configure(bg=c["tree_bg"], fg=c["fg_primary"])
+        # Update all tracked description Text widgets (main window + any
+        # open dialogs).  Prune destroyed widgets while iterating.
+        live = set()
+        for w in _desc_texts:
+            if w.winfo_exists():
+                w.configure(bg=c["tree_bg"], fg=c["fg_primary"])
+                live.add(w)
+        _desc_texts.clear()
+        _desc_texts.update(live)
 
 
 def _main():
@@ -343,8 +348,16 @@ def _main():
 #
 #     We reset this to False whenever the configuration is saved.
 #
+#   _desc_texts:
+#     Set of description Text widgets (main window + open dialogs).
+#     Pruned of destroyed widgets during theme apply().
+#
 #   _*_img:
 #     PhotoImage instances for images
+
+# Initialized here because ThemeManager.apply() may be called before any
+# tree/desc widgets exist.
+_desc_texts = set()
 
 
 def menuconfig(kconf):
@@ -368,6 +381,7 @@ def menuconfig(kconf):
     _jump_to_tree = None
     _tree_row_index = 0
     _search_after_id = None
+    _desc_texts.clear()
 
     _create_id_to_node()
 
@@ -843,15 +857,13 @@ def _create_kconfig_tree_and_desc(parent):
     # Panedwindow and the Treeview. This code is shared between the main window
     # and the jump-to dialog.
 
-    global _desc_text
-
     panedwindow = ttk.Panedwindow(parent, orient=VERTICAL)
 
     tree_frame, tree = _create_kconfig_tree(panedwindow)
     desc_frame, desc = _create_kconfig_desc(panedwindow)
 
-    # Save desc widget globally for theme updates
-    _desc_text = desc
+    # Register desc widget for theme updates (pruned automatically in apply())
+    _desc_texts.add(desc)
 
     panedwindow.add(tree_frame, weight=1)
     panedwindow.add(desc_frame)
@@ -2381,6 +2393,10 @@ def _jump_to_dialog(_=None):
 
     # Wait for the user to be done with the dialog
     _root.wait_window(dialog)
+
+    # Prune any destroyed desc widgets (e.g. the dialog's) so they don't
+    # accumulate across repeated open/close cycles.
+    _desc_texts.difference_update({w for w in _desc_texts if not w.winfo_exists()})
 
     _jump_to_tree = None
 
