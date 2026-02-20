@@ -9,27 +9,36 @@ Overview
 ========
 
 A terminal-based menuconfig implementation using rawterm (pure-Python terminal
-I/O). The interface should feel familiar to people used to mconf
-('make menuconfig').
+I/O). The interface mimics the mconf ('make menuconfig' in the Linux kernel) as
+closely as possible, using the same key bindings.
 
-Supports the same keys as mconf, and also supports a set of keybindings
-inspired by Vi:
+Key bindings match mconf:
 
-  J/K      : Down/Up
-  L        : Enter menu/Toggle item
-  H        : Leave menu
-  Ctrl-D/U : Page Down/Page Up
-  G/End    : Jump to end of list
-  g/Home   : Jump to beginning of list
+  Arrow keys      : Navigate menu items
+  PgUp/PgDn       : Page up/down (also Ctrl-D/Ctrl-U)
+  Home/End         : Jump to beginning/end of list
+  Space            : Toggle value or enter menu
+  Enter            : Activate focused button
+  Tab/Left/Right   : Cycle between buttons
+  Y/S              : Set symbol to YES
+  N                : Set symbol to NO
+  M                : Set symbol to MODULE
+  H/?              : Show help for selected item
+  /                : Jump-to symbol search
+  ESC/Backspace    : Leave menu (quit dialog at top level)
+  E/X              : Leave menu (same as ESC in submenus)
+  Q                : Quit
 
 The bottom of the dialog shows five buttons: Select, Exit, Help, Save, Load.
 [Tab]/[Left]/[Right] cycle between buttons. [Enter] activates the focused
 button. [Space] toggles values if possible, and enters menus otherwise.
 
-The mconf feature where pressing a key jumps to a menu entry with that
-character in it in the current menu isn't supported. A jump-to feature for
-jumping directly to any symbol (including invisible symbols), choice, menu or
-comment (as in a Kconfig 'comment "Foo"') is available instead.
+VI-style navigation keys (j/k/l/g/G) are not bound, leaving them free for
+future hotkey search (matching mconf).  H is rebound to help (matching mconf).
+
+A jump-to feature for jumping directly to any symbol (including invisible
+symbols), choice, menu or comment (as in a Kconfig 'comment "Foo"') is
+available via the '/' key.
 
 A few different modes are available:
 
@@ -40,9 +49,9 @@ A few different modes are available:
   C: Toggle show-name mode, which shows the symbol name before each symbol menu
   entry
 
-  A: Toggle show-all mode, which shows all items, including currently invisible
-  items and items that lack a prompt. Invisible items are drawn in a different
-  style to make them stand out.
+  A/Z: Toggle show-all mode, which shows all items, including currently
+  invisible items and items that lack a prompt. Invisible items are drawn in a
+  different style to make them stand out.
 
 
 Running
@@ -133,9 +142,9 @@ A keyword without the '=' is assumed to be a style template. The template name
 is looked up in the built-in styles list and the style definition is expanded
 in-place. With this, built-in styles can be used as basis for new styles.
 
-For example, take the aquatic theme and give it a red selection bar:
+For example, take the linux theme and give it a red selection bar:
 
-MENUCONFIG_STYLE="aquatic selection=fg:white,bg:red"
+MENUCONFIG_STYLE="linux selection=fg:white,bg:red"
 
 If there's an error in the style definition or if a missing style is assigned
 to, the assignment will be ignored, along with a warning being printed on
@@ -282,8 +291,8 @@ view the help of the selected item without leaving the dialog.
 #
 
 _STYLES = {
-    # Style matching the Linux kernel's menuconfig (mconf/lxdialog)
-    # Precisely matches lxdialog's set_bluetitle_theme() and set_classic_theme()
+    # Style matching the Linux kernel's menuconfig (mconf/lxdialog).
+    # Matches lxdialog's set_bluetitle_theme() (the default theme).
     "linux": """
     screen=fg:cyan,bg:blue,bold
     path=fg:white,bg:blue,bold
@@ -598,10 +607,10 @@ def _menuconfig(term):
         # Menu item navigation (Up/Down/PgUp/PgDn/Home/End)
         #
 
-        elif c in (Key.DOWN, "j", "J"):
+        elif c == Key.DOWN:
             _select_next_menu_entry()
 
-        elif c in (Key.UP, "k", "K"):
+        elif c == Key.UP:
             _select_prev_menu_entry()
 
         elif c in (Key.PAGE_DOWN, "\x04"):  # Page Down/Ctrl-D
@@ -612,10 +621,10 @@ def _menuconfig(term):
             for _ in range(_PG_JUMP):
                 _select_prev_menu_entry()
 
-        elif c in (Key.END, "G"):
+        elif c == Key.END:
             _select_last_menu_entry()
 
-        elif c in (Key.HOME, "g"):
+        elif c == Key.HOME:
             _select_first_menu_entry()
 
         #
@@ -671,62 +680,31 @@ def _menuconfig(term):
             if not _change_node(sel_node):
                 _enter_menu(sel_node)
 
-        elif c in ("l", "L"):
-            # Vi: enter menu/toggle item
-            sel_node = _shown[_sel_node_i]
-            if not _enter_menu(sel_node):
-                _change_node(sel_node)
-
         elif c in ("n", "N"):
             _set_sel_node_tri_val(0)
 
         elif c in ("m", "M"):
             _set_sel_node_tri_val(1)
 
-        elif c in ("y", "Y"):
+        elif c in ("y", "Y", "s", "S"):
+            # Y and S both set YES (matching C mconf)
             _set_sel_node_tri_val(2)
 
-        elif c in (Key.BACKSPACE, "\x1b", "h", "H"):
-            # Leave menu (ESC/Backspace/Vi H)
-            if c == "\x1b" and _cur_menu is _kconf.top_node:
+        elif c in (Key.BACKSPACE, "\x1b", "e", "x", "E", "X"):
+            # Leave menu (ESC/Backspace/E/X). At top level, ESC/E/X show
+            # quit dialog; Backspace always just leaves.
+            if c != Key.BACKSPACE and _cur_menu is _kconf.top_node:
                 res = _quit_dialog()
                 if res:
                     return res
             else:
                 _leave_menu()
-
-        elif c in ("e", "x", "E", "X"):
-            # Exit (mconf: 'e' and 'x' trigger ESC behavior)
-            if _cur_menu is _kconf.top_node:
-                res = _quit_dialog()
-                if res:
-                    return res
-            else:
-                _leave_menu()
-
-        elif c in ("o", "O"):
-            _load_dialog()
-
-        elif c in ("s", "S"):
-            filename = _save_dialog(
-                _kconf.write_config, _conf_filename, "configuration"
-            )
-            if filename:
-                _conf_filename = filename
-                _conf_changed = False
-
-        elif c in ("d", "D"):
-            filename = _save_dialog(
-                _kconf.write_min_config, _minconf_filename, "minimal configuration"
-            )
-            if filename:
-                _minconf_filename = filename
 
         elif c == "/":
             _jump_to_dialog()
             _resize_main()
 
-        elif c == "?":
+        elif c in ("?", "h", "H"):
             _info_dialog(_shown[_sel_node_i], False)
             _resize_main()
 
@@ -752,21 +730,20 @@ def _quit_dialog():
     if not _conf_changed and config_exists:
         return f"No changes to save (for '{_conf_filename}')"
 
-    # Use button dialog with Yes/No/Cancel buttons (matching lxdialog style)
-    # Adjust message if .config doesn't exist
-    if not config_exists:
-        dialog_text = "No configuration file found.\nSave new configuration?"
-    else:
-        dialog_text = "Save configuration?"
+    # Match C mconf's handle_exit() -- dialog_yesno with 2 buttons
+    dialog_text = (
+        "Do you wish to save your new configuration?\n"
+        "(Press <ESC> to continue kernel configuration.)"
+    )
 
     result = _button_dialog(
         None,  # No title in yesno dialog
         dialog_text,
-        [" Yes ", "  No  ", " Cancel "],
+        [" Yes ", "  No  "],
         default_button=0,
     )
 
-    if result is None or result == 2:  # ESC or Cancel
+    if result is None:  # ESC -- back to menu
         return None
 
     if result == 0:  # Yes
@@ -1304,20 +1281,12 @@ def _draw_main():
     # Matches mconf: draw_box(dialog, 0, 0, h, w, dlg.dialog.atr, dlg.border.atr)
     _draw_box(_dialog_win, 0, 0, dlg_h, dlg_w, body_style, border_style)
 
-    # Separator line (LTEE + HLINE + RTEE) at row dlg_h - 3
-    _dialog_win.write_char(dlg_h - 3, 0, Box.LTEE, border_style)
-    for j in range(1, dlg_w - 1):
-        _dialog_win.write_char(dlg_h - 3, j, Box.HLINE, border_style)
-    _dialog_win.write_char(dlg_h - 3, dlg_w - 1, Box.RTEE, border_style)
+    # Separator between menu area and buttons
+    _draw_separator(_dialog_win, dlg_h - 3, dlg_w)
 
     # Title centered in top border (like mconf's print_title())
     title = _cur_menu.prompt[0] if _cur_menu.prompt else _kconf.mainmenu_text
-    title_style = _style.get("title", border_style)
-    tlen = min(dlg_w - 2, len(title))
-    title_x = (dlg_w - tlen) // 2
-    _dialog_win.write_char(0, title_x - 1, " ", title_style)
-    _dialog_win.write(0, title_x, title[:tlen], title_style)
-    _dialog_win.write_char(0, title_x + tlen, " ", title_style)
+    _draw_title(_dialog_win, title, dlg_w)
 
     # Instruction text (autowrapped, like mconf's print_autowrap())
     # mconf: print_autowrap(dialog, prompt, width - 2, 1, 3)
@@ -1339,10 +1308,8 @@ def _draw_main():
                     break
                 _dialog_win.write(row, inst_x, line, body_style)
 
-    # Inner menu box (like mconf's inner draw_box for the menu area)
-    # mconf: draw_box(dialog, box_y, box_x, mh+2, mw+2,
-    #                 dlg.menubox_border.atr, dlg.menubox.atr)
-    # box = menubox_border (white/white/bold), border = menubox (black/white)
+    # Inner menu box: box_style=menubox-border, border_style=menubox
+    # (matching mconf's draw_box for the menu area)
     inner_box_style = _style.get("menubox-border", _style["frame"])
     inner_border_style = _style.get("menubox", _style["list"])
     _draw_box(
@@ -1754,11 +1721,11 @@ def _input_dialog(title, initial_text, info_text=None):
                 _term.hide_cursor()
                 return s
 
-            elif c == "\x1b":  # \x1B = ESC
+            elif c == "\x1b":  # ESC
                 _term.hide_cursor()
                 return None
 
-            elif c == "\0":  # \0 = NUL, ignore
+            elif c == "\0":  # NUL, ignore
                 pass
 
             else:
@@ -1793,15 +1760,21 @@ def _draw_input_dialog(win, title, info_lines, s, i, hscroll):
 
     win.clear()
 
+    # Draw the frame first (like _draw_key_dialog), then content on top.
+    # _draw_frame fills the interior with body_style via _draw_box, so
+    # content must be drawn after to remain visible.
+    _draw_frame(win, title)
+
     # Note: Perhaps having a separate window for the input field would be nicer
     visible_s = s[hscroll : hscroll + edit_width]
     win.write(2, 2, visible_s + " " * (edit_width - len(visible_s)), _style["edit"])
 
+    max_info_rows = max(_height(win) - 5, 0)
     for linenr, line in enumerate(info_lines):
-        win.write(4 + linenr, 2, line, _style["body"])
-
-    # Draw the frame last so that it overwrites the body text for small windows
-    _draw_frame(win, title)
+        if linenr >= max_info_rows:
+            break
+        # Truncate then pad to interior width so body_style covers frame bg
+        win.write(4 + linenr, 2, line[:edit_width].ljust(edit_width), _style["body"])
 
     _term.set_cursor(win, 2, 2 + i - hscroll)
 
@@ -2000,9 +1973,14 @@ def _draw_key_dialog(win, title, text):
     # Draw the frame first
     _draw_frame(win, title)
 
-    # Then draw text content inside the frame
+    # Draw text content inside the frame, clamped to the interior so that
+    # border characters are never overwritten on small terminals.
+    text_width = max(_width(win) - 4, 0)
+    max_rows = max(_height(win) - 3, 0)
     for i, line in enumerate(text.split("\n")):
-        win.write(2 + i, 2, line, _style["body"])
+        if i >= max_rows:
+            break
+        win.write(2 + i, 2, line[:text_width], _style["body"])
 
 
 def _button_dialog(title, text, buttons, default_button=0):
@@ -2010,7 +1988,7 @@ def _button_dialog(title, text, buttons, default_button=0):
     #
     # title: Dialog title (shown at top of border if provided)
     # text: Dialog text content
-    # buttons: List of button labels (e.g., [" Yes ", "  No  ", " Cancel "])
+    # buttons: List of button labels (e.g., [" Yes ", "  No  "])
     # default_button: Index of initially selected button
     #
     # Returns: Index of selected button, or None if ESC pressed
@@ -2030,8 +2008,8 @@ def _button_dialog(title, text, buttons, default_button=0):
         win_height = min(len(lines) + 5, _term.height - 4)
         # Calculate width from longest line and button row
         # Button row width includes buttons + spacing between them
-        # 2 buttons: spacing 13, 3+ buttons: spacing 4
-        spacing = 13 if len(buttons) == 2 else 4
+        # 2 buttons: spacing 6, 3+ buttons: spacing 4
+        spacing = 6 if len(buttons) == 2 else 4
         button_row_width = sum(len(b) + 2 for b in buttons) + spacing * (
             len(buttons) - 1
         )
@@ -2045,64 +2023,43 @@ def _button_dialog(title, text, buttons, default_button=0):
 
         bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
-        frame_style = _style.get("dialog-frame", _style["dialog"])
+        body_style = _style["body"]
+
         while True:
             # Draw main display behind dialog
             _draw_main()
 
             win.clear()
 
-            # Draw box border
-            _draw_box(win, 0, 0, win_height, win_width, frame_style, frame_style)
+            _draw_box(win, 0, 0, win_height, win_width, body_style, body_style)
 
-            row_fill = " " * (win_width - 2)
+            _draw_title(win, title, win_width)
 
-            # Draw title bar if title provided
-            if title:
-                win.write(0, 1, row_fill, frame_style)
-                win.write(0, (win_width - len(title)) // 2, title, frame_style)
+            _draw_separator(win, win_height - 3, win_width)
 
-            # Draw horizontal separator line before buttons (height - 3)
-            win.write_char(win_height - 3, 0, Box.LTEE, frame_style)
-            for i in range(1, win_width - 1):
-                win.write_char(win_height - 3, i, Box.HLINE, frame_style)
-            win.write_char(win_height - 3, win_width - 1, Box.RTEE, frame_style)
-
-            # Draw text content
-            for i in range(1, win_height - 3):
-                win.write(i, 1, row_fill, frame_style)
+            # Draw text content, clamped to the interior above the separator
+            text_width = win_width - 4
+            max_text_rows = win_height - 4
             for i, line in enumerate(lines):
-                win.write(1 + i, 2, line, frame_style)
+                if i >= max_text_rows:
+                    break
+                win.write(1 + i, 2, line[:text_width], body_style)
 
-            # Buttons at row (height - 2)
+            # Draw buttons at row (height - 2), using the same spacing
+            # computed for initial sizing above.  Clamp x to protect the
+            # left border on narrow terminals.
             button_y = win_height - 2
-
-            # Fill button row background
-            win.write(button_y, 1, row_fill, frame_style)
-
-            # Calculate button positions with spacing
-            # 2 buttons: 13 chars spacing (from lxdialog/yesno.c), 3+: spacing 4
-            btn_spacing = 13 if len(buttons) == 2 else 4
-            total_width = sum(len(b) + 2 for b in buttons) + btn_spacing * (
-                len(buttons) - 1
-            )
-            button_positions = []
-            current_x = (win_width - total_width) // 2
-            for b in buttons:
-                button_positions.append(current_x)
-                current_x += len(b) + 2 + btn_spacing
-
-            # Draw buttons at calculated positions
+            current_x = max((win_width - button_row_width) // 2, 1)
             for i, button_label in enumerate(buttons):
                 _print_button(
                     win,
                     button_label,
                     button_y,
-                    button_positions[i],
+                    current_x,
                     i == selected_button,
                 )
+                current_x += len(button_label) + 2 + spacing
 
-            # Refresh shadow windows after dialog window to ensure they're on top
             _refresh_shadow_windows(bottom_shadow, right_shadow)
 
             _term.update()
@@ -2112,6 +2069,12 @@ def _button_dialog(title, text, buttons, default_button=0):
 
             if c == Key.RESIZE:
                 _resize_main()
+                # Recompute dimensions for new terminal size
+                win_height = min(len(lines) + 5, _term.height - 4)
+                win_width = min(
+                    max(max(len(line) for line in lines) + 4, button_row_width + 4),
+                    _term.width - 4,
+                )
                 win.resize(win_height, win_width)
                 win.move(
                     (_term.height - win_height) // 2,
@@ -2123,13 +2086,13 @@ def _button_dialog(title, text, buttons, default_button=0):
             elif c == "\x1b":  # ESC
                 return None
 
-            elif c in ("\t", Key.RIGHT):  # TAB or RIGHT arrow
+            elif c in ("\t", Key.RIGHT):  # Tab/Right
                 selected_button = (selected_button + 1) % len(buttons)
 
-            elif c == Key.LEFT:  # LEFT arrow
+            elif c == Key.LEFT:
                 selected_button = (selected_button - 1) % len(buttons)
 
-            elif c in (" ", "\n"):  # SPACE or ENTER
+            elif c in (" ", "\n"):  # Space/Enter
                 return selected_button
 
             elif isinstance(c, str):
@@ -2145,11 +2108,9 @@ def _button_dialog(title, text, buttons, default_button=0):
 
 
 def _print_button(win, label, y, x, selected):
-    # Print a button matching lxdialog's print_button()
-    #
-    # Format: <Label> with first letter highlighted
-    # selected: If True, button is active (white background - reversed)
-    # inactive: blue background (same as dialog background)
+    # Print a button matching lxdialog's print_button().
+    # Format: <Label> with the first letter highlighted as a hotkey.
+    # Uses button-active or button-inactive style depending on 'selected'.
 
     # Count leading spaces
     leading_spaces = len(label) - len(label.lstrip(" "))
@@ -2182,30 +2143,61 @@ def _draw_box(win, y, x, height, width, box_style, border_style):
     # draw_box().  Fills the interior with box_style, matching the C version
     # which writes (box | ' ') for every interior cell.
     #
-    # box_style: style for interior, right/bottom borders
-    # border_style: style for left/top borders
+    # box_style:    interior fill, right edge, bottom edge, URCORNER, LRCORNER
+    # border_style: left edge, top edge, ULCORNER, LLCORNER
+    #
+    # Popup dialogs pass the same style for both to ensure visible borders
+    # (the C bold-white-on-white convention relies on ncurses ACS rendering
+    # that raw terminal output cannot replicate).
 
     last_row = y + height - 1
     last_col = x + width - 1
 
-    # Top border (border_style for left/top edge)
+    # Top row
     win.write_char(y, x, Box.ULCORNER, border_style)
     for j in range(x + 1, last_col):
         win.write_char(y, j, Box.HLINE, border_style)
     win.write_char(y, last_col, Box.URCORNER, box_style)
 
-    # Interior rows: left border + fill + right border
+    # Interior rows
     fill = " " * (width - 2)
     for i in range(y + 1, last_row):
         win.write_char(i, x, Box.VLINE, border_style)
         win.write(i, x + 1, fill, box_style)
         win.write_char(i, last_col, Box.VLINE, box_style)
 
-    # Bottom border (box_style for right/bottom edge)
+    # Bottom row
     win.write_char(last_row, x, Box.LLCORNER, border_style)
     for j in range(x + 1, last_col):
         win.write_char(last_row, j, Box.HLINE, box_style)
     win.write_char(last_row, last_col, Box.LRCORNER, box_style)
+
+
+def _draw_title(win, title, width):
+    # Draw centered title on the top border, matching C's print_title().
+    # Uses width-4 (not width-2) so the padding spaces never overwrite the
+    # corner characters at columns 0 and width-1.
+    if title:
+        title_style = _style.get("title", _style["body"])
+        max_tlen = width - 4
+        if max_tlen <= 0:
+            return
+        tlen = min(max_tlen, len(title))
+        tx = (width - tlen) // 2
+        win.write_char(0, tx - 1, " ", title_style)
+        win.write(0, tx, title[:tlen], title_style)
+        win.write_char(0, tx + tlen, " ", title_style)
+
+
+def _draw_separator(win, y, width):
+    # Draw separator line.  Uses body_style for all characters so the line
+    # is visible on white backgrounds (the C bold-white-on-white convention
+    # relies on ncurses ACS rendering that raw terminal output cannot match).
+    body_s = _style["body"]
+    win.write_char(y, 0, Box.LTEE, body_s)
+    for j in range(1, width - 1):
+        win.write_char(y, j, Box.HLINE, body_s)
+    win.write_char(y, width - 1, Box.RTEE, body_s)
 
 
 def _draw_scrollbar(
@@ -2289,45 +2281,35 @@ def _create_shadow_windows(y, x, height, width, right_y_offset=1):
 
 def _close_shadow_windows(bottom_shadow, right_shadow):
     # Unregister shadow regions from the compositor so they stop rendering.
-    if bottom_shadow:
-        try:
-            bottom_shadow.close()
-        except Exception:
-            pass
-    if right_shadow:
-        try:
-            right_shadow.close()
-        except Exception:
-            pass
+    for shadow in (bottom_shadow, right_shadow):
+        if shadow:
+            try:
+                shadow.close()
+            except Exception:
+                pass
 
 
 def _refresh_shadow_windows(bottom_shadow, right_shadow):
     # Shadow regions are composited automatically by _term.update().
     # Just clear and refill them to ensure correct content.
-    if bottom_shadow:
-        try:
-            bottom_shadow.clear()
-        except Exception:
-            pass
-    if right_shadow:
-        try:
-            right_shadow.clear()
-        except Exception:
-            pass
+    for shadow in (bottom_shadow, right_shadow):
+        if shadow:
+            try:
+                shadow.clear()
+            except Exception:
+                pass
 
 
 def _draw_frame(win, title):
-    # Draw a frame around the inner edges of 'win', with 'title' at the top
-    # Uses _draw_box() for proper box drawing characters
+    # Draw a frame around the inner edges of 'win', with 'title' at the top.
 
     win_height = win.height
     win_width = win.width
+    body_style = _style["body"]
 
-    # Draw box with frame style for both border and box
-    _draw_box(win, 0, 0, win_height, win_width, _style["frame"], _style["frame"])
+    _draw_box(win, 0, 0, win_height, win_width, body_style, body_style)
 
-    # Draw title
-    win.write(0, max((win_width - len(title)) // 2, 0), title, _style["frame"])
+    _draw_title(win, title, win_width)
 
 
 def _jump_to_dialog():
@@ -2377,10 +2359,9 @@ def _jump_to_dialog():
 
         _term.show_cursor(very_visible=True)
 
-        # Logic duplication with _select_{next,prev}_menu_entry(), except we
-        # do a functional variant that returns the new (sel_node_i, scroll)
-        # values to avoid 'nonlocal'. TODO: Can this be factored out in some
-        # nice way?
+        # Functional variants of _select_{next,prev}_menu_entry() that return
+        # new (sel_node_i, scroll) tuples instead of mutating globals, to
+        # avoid 'nonlocal'.
 
         def select_next_match():
             if sel_node_i == len(matches) - 1:
@@ -2509,7 +2490,7 @@ def _jump_to_dialog():
                     _term.hide_cursor()
                     return True
 
-            elif c == "\x1b":  # \x1B = ESC
+            elif c == "\x1b":  # ESC
                 _term.hide_cursor()
                 return False
 
@@ -2523,7 +2504,7 @@ def _jump_to_dialog():
 
                 bottom_shadow, right_shadow = _jump_to_shadows()
 
-            elif c == "\x06":  # \x06 = Ctrl-F
+            elif c == "\x06":  # Ctrl-F
                 if matches:
                     _term.hide_cursor()
                     _info_dialog(matches[sel_node_i], True)
@@ -2559,7 +2540,7 @@ def _jump_to_dialog():
             elif c == Key.HOME:
                 sel_node_i = scroll = 0
 
-            elif c == "\0":  # \0 = NUL, ignore
+            elif c == "\0":  # NUL, ignore
                 pass
 
             else:
@@ -2855,7 +2836,7 @@ def _info_dialog(node, from_jump_to_dialog):
             elif c in (
                 Key.LEFT,
                 Key.BACKSPACE,
-                "\x1b",  # \x1B = ESC
+                "\x1b",  # ESC
                 "\n",  # Enter
                 " ",  # Space
                 "q",
@@ -2918,27 +2899,14 @@ def _draw_info_dialog(win, node, lines, scroll):
     title = _info_dialog_title(node)
 
     body_style = _style["body"]
-    border_style = _style.get("border", _style["frame"])
-    title_style = _style.get("title", border_style)
 
     win.clear()
 
-    # Outer box -- same styles as the main dialog
-    _draw_box(win, 0, 0, win_height, win_width, body_style, border_style)
+    _draw_box(win, 0, 0, win_height, win_width, body_style, body_style)
 
-    # Title centered in top border
-    if title:
-        tlen = min(win_width - 2, len(title))
-        title_x = (win_width - tlen) // 2
-        win.write_char(0, title_x - 1, " ", title_style)
-        win.write(0, title_x, title[:tlen], title_style)
-        win.write_char(0, title_x + tlen, " ", title_style)
+    _draw_title(win, title, win_width)
 
-    # Separator line at height - 3
-    win.write_char(win_height - 3, 0, Box.LTEE, border_style)
-    for j in range(1, win_width - 1):
-        win.write_char(win_height - 3, j, Box.HLINE, border_style)
-    win.write_char(win_height - 3, win_width - 1, Box.RTEE, border_style)
+    _draw_separator(win, win_height - 3, win_width)
 
     # Text area: rows 1 .. height-4
     text_height = win_height - 4
@@ -2958,8 +2926,9 @@ def _draw_info_dialog(win, node, lines, scroll):
             win_height - 3, win_width - len(percent_str) - 2, percent_str, body_style
         )
 
-    # Exit button at height - 2, centered (matching dialog_textbox)
-    _print_button(win, " Exit ", win_height - 2, win_width // 2 - 4, True)
+    # Exit button at height - 2, centered (matching dialog_textbox).
+    # Clamp x to protect the left border on narrow terminals.
+    _print_button(win, " Exit ", win_height - 2, max(win_width // 2 - 4, 1), True)
 
 
 def _max_scroll_info(lines, win):
@@ -2978,8 +2947,8 @@ def _info_str_mconf(node):
 
     s = ""
 
-    # MENU/COMMENT nodes lack a 'help' slot assignment, so use getattr
-    # to avoid AttributeError.
+    # MENU/COMMENT nodes may not have .help set (only initialized by
+    # _parse_props when a 'help' keyword exists in the Kconfig source).
     node_help = getattr(node, "help", None)
 
     # CONFIG_NAME header (only when node has help and symbol/choice has name)
@@ -3448,10 +3417,10 @@ def _edit_text(c, s, i, hscroll, width):
         if i < len(s):
             i += 1
 
-    elif c in (Key.HOME, "\x01"):  # \x01 = CTRL-A
+    elif c in (Key.HOME, "\x01"):  # Ctrl-A
         i = 0
 
-    elif c in (Key.END, "\x05"):  # \x05 = CTRL-E
+    elif c in (Key.END, "\x05"):  # Ctrl-E
         i = len(s)
 
     elif c == Key.BACKSPACE:
@@ -3462,16 +3431,16 @@ def _edit_text(c, s, i, hscroll, width):
     elif c == Key.DELETE:
         s = s[:i] + s[i + 1 :]
 
-    elif c == "\x17":  # \x17 = CTRL-W
+    elif c == "\x17":  # Ctrl-W
         # The \W removes characters like ',' one at a time
         new_i = re.search(r"(?:\w*|\W)\s*$", s[:i]).start()
         s = s[:new_i] + s[i:]
         i = new_i
 
-    elif c == "\x0b":  # \x0B = CTRL-K
+    elif c == "\x0b":  # Ctrl-K
         s = s[:i]
 
-    elif c == "\x15":  # \x15 = CTRL-U
+    elif c == "\x15":  # Ctrl-U
         s = s[i:]
         i = 0
 
