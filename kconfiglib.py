@@ -4710,13 +4710,16 @@ class Symbol(object):
                             self._origin = _T_DEFAULT, loc
                         break
 
-                # Weak reverse dependencies are only considered if our
-                # direct dependencies are met
+                # Weak reverse dependencies (imply).  The C
+                # implementation always sets SYMBOL_WRITE when the
+                # implied value is non-zero, even when the direct
+                # dependencies gate the actual value to zero.
                 dep_val = expr_value(self.weak_rev_dep)
-                if dep_val and expr_value(self.direct_dep):
-                    val = max(dep_val, val)
+                if dep_val:
                     self._write_to_conf = True
-                    self._origin = _T_IMPLY, None  # expanded later
+                    if expr_value(self.direct_dep):
+                        val = max(dep_val, val)
+                        self._origin = _T_IMPLY, None  # expanded later
 
             # Reverse (select-related) dependencies take precedence
             dep_val = expr_value(self.rev_dep)
