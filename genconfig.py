@@ -74,11 +74,11 @@ information isn't needed.
         metavar="OUTPUT_DIR",
         nargs="?",
         const=DEFAULT_SYNC_DEPS_PATH,
-        help="""
+        help=f"""
 Enable generation of symbol dependency information for incremental builds,
-optionally specifying the output directory (default: {}). See the docstring of
+optionally specifying the output directory (default: {DEFAULT_SYNC_DEPS_PATH}). See the docstring of
 Kconfig.sync_deps() in Kconfiglib for more information.
-""".format(DEFAULT_SYNC_DEPS_PATH),
+""",
     )
 
     parser.add_argument(

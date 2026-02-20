@@ -63,28 +63,26 @@ def main():
 
     for arg in args.assignments:
         if "=" not in arg:
-            sys.exit("error: no '=' in assignment: '{}'".format(arg))
+            sys.exit(f"error: no '=' in assignment: '{arg}'")
         name, value = arg.split("=", 1)
 
         if name not in kconf.syms:
             if not args.check_exists:
                 continue
-            sys.exit("error: no symbol '{}' in configuration".format(name))
+            sys.exit(f"error: no symbol '{name}' in configuration")
 
         sym = kconf.syms[name]
 
         if not sym.set_value(value):
             sys.exit(
-                "error: '{}' is an invalid value for the {} symbol {}".format(
-                    value, kconfiglib.TYPE_TO_STR[sym.orig_type], name
-                )
+                f"error: '{value}' is an invalid value for the {kconfiglib.TYPE_TO_STR[sym.orig_type]} symbol {name}"
             )
 
         if args.check_value and sym.str_value != value:
             sys.exit(
-                "error: {} was assigned the value '{}', but got the "
-                "value '{}'. Check the symbol's dependencies, and make "
-                "sure that it has a prompt.".format(name, value, sym.str_value)
+                f"error: {name} was assigned the value '{value}', but got the "
+                f"value '{sym.str_value}'. Check the symbol's dependencies, and make "
+                "sure that it has a prompt."
             )
 
     print(kconf.write_config())

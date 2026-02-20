@@ -93,9 +93,7 @@ def oldconfig(node):
         # (for the default value)
         while True:
             val = input(
-                "{} ({}) [{}] ".format(
-                    node.prompt[0], _name_and_loc_str(sym), _default_value_str(sym)
-                )
+                f"{node.prompt[0]} ({_name_and_loc_str(sym)}) [{_default_value_str(sym)}] "
             )
 
             if val == "?":
@@ -158,7 +156,7 @@ def oldconfig(node):
         # Loop until the user enters a valid selection or a blank string (for
         # the default selection)
         while True:
-            print("{} ({})".format(node.prompt[0], _name_and_loc_str(choice)))
+            print(f"{node.prompt[0]} ({_name_and_loc_str(choice)})")
 
             for i, sym in enumerate(options, 1):
                 print(
@@ -172,7 +170,7 @@ def oldconfig(node):
                     )
                 )
 
-            sel_index = input("choice[1-{}]: ".format(len(options)))
+            sel_index = input(f"choice[1-{len(options)}]: ")
 
             if sel_index == "?":
                 _print_help(node)
@@ -221,7 +219,7 @@ def _name_and_loc_str(sc):
 
     return "{}, defined at {}".format(
         sc.name or "choice",
-        ", ".join("{}:{}".format(node.filename, node.linenr) for node in sc.nodes),
+        ", ".join(f"{node.filename}:{node.linenr}" for node in sc.nodes),
     )
 
 
