@@ -2,8 +2,7 @@
 # together with their values, as a list of assignments.
 #
 # Note: This only works for environment variables referenced via the $(FOO)
-# preprocessor syntax. The older $FOO syntax is maintained for backwards
-# compatibility.
+# preprocessor syntax.
 
 import os
 import sys

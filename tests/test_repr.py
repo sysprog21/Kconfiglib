@@ -564,7 +564,7 @@ class TestSymbolRepr:
     def test_choice_sym(self):
         assert (
             repr(self.c.syms["CHOICE_1"])
-            == '<symbol CHOICE_1, tristate, "choice sym", value n, visibility m, choice symbol, direct deps m, tests/Krepr:36>'
+            == '<symbol CHOICE_1, tristate, "choice sym", value y, visibility y, choice symbol, direct deps y, tests/Krepr:36>'
         )
 
     def test_modules(self):
@@ -585,7 +585,7 @@ class TestChoiceRepr:
     def test_choice_basic(self):
         assert (
             repr(self.c.named_choices["CHOICE"])
-            == '<choice CHOICE, tristate, "choice", mode m, visibility y, tests/Krepr:33>'
+            == '<choice CHOICE, tristate, "choice", mode m, CHOICE_1 selected, visibility y, tests/Krepr:33>'
         )
 
     def test_choice_set_value_y(self):
@@ -609,7 +609,7 @@ class TestChoiceRepr:
         self.c.named_choices["CHOICE"].set_value(1)
         assert (
             repr(self.c.named_choices["CHOICE"])
-            == '<choice CHOICE, tristate, "choice", mode m, user mode m, CHOICE_2 selected by user (overridden), visibility y, tests/Krepr:33>'
+            == '<choice CHOICE, tristate, "choice", mode m, user mode m, CHOICE_2 selected, CHOICE_2 selected by user, visibility y, tests/Krepr:33>'
         )
 
     def test_choice_optional_unnamed(self):

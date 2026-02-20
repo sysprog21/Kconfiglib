@@ -345,7 +345,7 @@ def test_expr_items():
     )
 
     items = expr_items(c.syms["TEST_CHOICE"].nodes[0].prompt[1])
-    assert tuple(sorted(item.name for item in items)) == ("A", "CHOICE")
+    assert tuple(sorted(item.name for item in items)) == ("A",)
 
 
 # ---------------------------------------------------------------------------

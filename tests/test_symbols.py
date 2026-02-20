@@ -49,22 +49,12 @@ def test_visibility():
     verify_visibility(c.syms["BOOL_MENU_N"], 0, 0)
     verify_visibility(c.syms["BOOL_MENU_M"], 0, 2)
     verify_visibility(c.syms["BOOL_MENU_Y"], 2, 2)
-    verify_visibility(c.syms["BOOL_CHOICE_N"], 0, 0)
-
-    # Non-tristate symbols in tristate choices are only visible if the choice
-    # is in y mode
-
-    # The choice can't be brought to y mode because of the 'if m'
-    verify_visibility(c.syms["BOOL_CHOICE_M"], 0, 0)
-    c.syms["BOOL_CHOICE_M"].choice.set_value(2)
-    verify_visibility(c.syms["BOOL_CHOICE_M"], 0, 0)
-
-    # The choice gets y mode only when running without modules, because it
-    # defaults to m mode
-    verify_visibility(c.syms["BOOL_CHOICE_Y"], 2, 0)
-    c.syms["BOOL_CHOICE_Y"].choice.set_value(2)
-    # When set to y mode, the choice symbol becomes visible both with and
-    # without modules
+    # Choice member visibility is purely prompt-based (no choice-mode
+    # capping), matching sym_calc_visibility() in scripts/kconfig/symbol.c
+    # (Linux).  Members with unconditional prompts have visibility y
+    # regardless of the choice's mode or prompt condition.
+    verify_visibility(c.syms["BOOL_CHOICE_N"], 2, 2)
+    verify_visibility(c.syms["BOOL_CHOICE_M"], 2, 2)
     verify_visibility(c.syms["BOOL_CHOICE_Y"], 2, 2)
 
     verify_visibility(c.syms["TRISTATE_IF_N"], 0, 0)
@@ -73,8 +63,8 @@ def test_visibility():
     verify_visibility(c.syms["TRISTATE_MENU_N"], 0, 0)
     verify_visibility(c.syms["TRISTATE_MENU_M"], 0, 1)
     verify_visibility(c.syms["TRISTATE_MENU_Y"], 2, 2)
-    verify_visibility(c.syms["TRISTATE_CHOICE_N"], 0, 0)
-    verify_visibility(c.syms["TRISTATE_CHOICE_M"], 0, 1)
+    verify_visibility(c.syms["TRISTATE_CHOICE_N"], 2, 2)
+    verify_visibility(c.syms["TRISTATE_CHOICE_M"], 2, 2)
     verify_visibility(c.syms["TRISTATE_CHOICE_Y"], 2, 2)
 
     verify_visibility(c.named_choices["BOOL_CHOICE_N"], 0, 0)
@@ -186,15 +176,16 @@ def test_assignable():
     verify_assignable("Y_CHOICE_TRISTATE", (2,), (2,))
     verify_assignable("Y_CHOICE_N_VIS_TRISTATE", (), ())
 
-    # Symbols in m/y-mode choice, starting out in m mode, or y mode when
-    # running without modules
-    verify_assignable("MY_CHOICE_BOOL", (2,), ())
-    verify_assignable("MY_CHOICE_TRISTATE", (2,), (0, 1))
+    # Symbols in m/y-mode choice -- choice member assignable is always (2,)
+    # when visible, regardless of the choice's mode, matching
+    # sym_calc_choice() in scripts/kconfig/symbol.c (Linux).
+    verify_assignable("MY_CHOICE_BOOL", (2,), (2,))
+    verify_assignable("MY_CHOICE_TRISTATE", (2,), (2,))
     verify_assignable("MY_CHOICE_N_VIS_TRISTATE", (), ())
 
     c.named_choices["MY_CHOICE"].set_value(2)
 
-    # Symbols in m/y-mode choice, now in y mode
+    # Setting the choice to y mode doesn't change assignable values
     verify_assignable("MY_CHOICE_BOOL", (2,), (2,))
     verify_assignable("MY_CHOICE_TRISTATE", (2,), (2,))
     verify_assignable("MY_CHOICE_N_VIS_TRISTATE", (), ())
@@ -266,12 +257,12 @@ def test_ranges():
     ):
         assert c.syms[sym_name].ranges, f"{sym_name} should have ranges"
 
-    # hex/int symbols without defaults should get no default value
-    verify_value(c, "HEX_NO_RANGE", "")
-    verify_value(c, "INT_NO_RANGE", "")
-    # And neither if all ranges are disabled
-    verify_value(c, "HEX_ALL_RANGES_DISABLED", "")
-    verify_value(c, "INT_ALL_RANGES_DISABLED", "")
+    # hex/int symbols without defaults get the C tools' default: "0"/"0x0"
+    verify_value(c, "HEX_NO_RANGE", "0x0")
+    verify_value(c, "INT_NO_RANGE", "0")
+    # Same when all ranges are disabled
+    verify_value(c, "HEX_ALL_RANGES_DISABLED", "0x0")
+    verify_value(c, "INT_ALL_RANGES_DISABLED", "0")
     # Make sure they are assignable though, and test that the form of the user
     # value is reflected in the value for hex symbols
     assign_and_verify(c, "HEX_NO_RANGE", "0x123")
@@ -292,20 +283,20 @@ def test_ranges():
     # hex/int symbols with no defaults but valid ranges should default to the
     # lower end of the range if it's > 0
     verify_value(c, "HEX_RANGE_10_20", "0x10")
-    verify_value(c, "HEX_RANGE_0_10", "")
+    verify_value(c, "HEX_RANGE_0_10", "0x0")
     verify_value(c, "INT_RANGE_10_20", "10")
-    verify_value(c, "INT_RANGE_0_10", "")
-    verify_value(c, "INT_RANGE_NEG_10_10", "")
+    verify_value(c, "INT_RANGE_0_10", "0")
+    verify_value(c, "INT_RANGE_NEG_10_10", "0")
 
     # User values and dependent ranges
 
     # Avoid warnings for assigning values outside the active range
     c.warn = False
 
-    def verify_range(sym_name, low, high, default):
+    def verify_range(sym_name, low, high):
         # Verifies that all values in the range low-high can be assigned,
-        # and that assigning values outside the range reverts the value back to
-        # default (None if it should revert back to "").
+        # and that assigning values outside the range clamps to the nearest
+        # bound (matching sym_validate_range() in scripts/kconfig/symbol.c).
 
         is_hex = c.syms[sym_name].type == HEX
 
@@ -317,38 +308,35 @@ def test_ranges():
                 assign_and_verify_user_value(c, sym_name, hex(i), hex(i), True)
 
         # Verify that assigning a user value just outside the range causes
-        # defaults to be used
-
-        if default is None:
-            default_str = ""
-        elif is_hex:
-            default_str = hex(default)
-        else:
-            default_str = str(default)
+        # clamping to the nearest bound
 
         if is_hex:
             too_low_str = hex(low - 1)
             too_high_str = hex(high + 1)
+            low_str = hex(low)
+            high_str = hex(high)
         else:
             too_low_str = str(low - 1)
             too_high_str = str(high + 1)
+            low_str = str(low)
+            high_str = str(high)
 
-        assign_and_verify_value(c, sym_name, too_low_str, default_str)
-        assign_and_verify_value(c, sym_name, too_high_str, default_str)
+        assign_and_verify_value(c, sym_name, too_low_str, low_str)
+        assign_and_verify_value(c, sym_name, too_high_str, high_str)
 
-    verify_range("HEX_RANGE_10_20_LOW_DEFAULT", 0x10, 0x20, 0x10)
-    verify_range("HEX_RANGE_10_20_HIGH_DEFAULT", 0x10, 0x20, 0x20)
-    verify_range("HEX_RANGE_10_20_OK_DEFAULT", 0x10, 0x20, 0x15)
+    verify_range("HEX_RANGE_10_20_LOW_DEFAULT", 0x10, 0x20)
+    verify_range("HEX_RANGE_10_20_HIGH_DEFAULT", 0x10, 0x20)
+    verify_range("HEX_RANGE_10_20_OK_DEFAULT", 0x10, 0x20)
 
-    verify_range("INT_RANGE_10_20_LOW_DEFAULT", 10, 20, 10)
-    verify_range("INT_RANGE_10_20_HIGH_DEFAULT", 10, 20, 20)
-    verify_range("INT_RANGE_10_20_OK_DEFAULT", 10, 20, 15)
+    verify_range("INT_RANGE_10_20_LOW_DEFAULT", 10, 20)
+    verify_range("INT_RANGE_10_20_HIGH_DEFAULT", 10, 20)
+    verify_range("INT_RANGE_10_20_OK_DEFAULT", 10, 20)
 
-    verify_range("HEX_RANGE_10_20", 0x10, 0x20, 0x10)
+    verify_range("HEX_RANGE_10_20", 0x10, 0x20)
 
-    verify_range("INT_RANGE_10_20", 10, 20, 10)
-    verify_range("INT_RANGE_0_10", 0, 10, None)
-    verify_range("INT_RANGE_NEG_10_10", -10, 10, None)
+    verify_range("INT_RANGE_10_20", 10, 20)
+    verify_range("INT_RANGE_0_10", 0, 10)
+    verify_range("INT_RANGE_NEG_10_10", -10, 10)
 
     # Dependent ranges
 
@@ -364,8 +352,8 @@ def test_ranges():
     verify_value(c, "HEX_RANGE_10_40_DEPENDENT", "0x15")
     verify_value(c, "INT_RANGE_10_40_DEPENDENT", "15")
     c.unset_values()
-    verify_range("HEX_RANGE_10_40_DEPENDENT", 0x10, 0x40, 0x10)
-    verify_range("INT_RANGE_10_40_DEPENDENT", 10, 40, 10)
+    verify_range("HEX_RANGE_10_40_DEPENDENT", 0x10, 0x40)
+    verify_range("INT_RANGE_10_40_DEPENDENT", 10, 40)
 
     # Ranges and symbols defined in multiple locations
 
@@ -378,7 +366,7 @@ def test_ranges():
 
 def test_defconfig_filename(monkeypatch):
     # The Kconfig test-data files (Kdefconfig_existent, etc.) contain hardcoded
-    # "Kconfiglib/tests/..." paths.  Compat tests run from a kernel tree root
+    # "Kconfiglib/tests/..." paths.  Conformance tests run from a kernel tree root
     # where those paths resolve.  Running from the project root we need a
     # "Kconfiglib" symlink pointing here.
     kconfiglib_link = os.path.join(os.getcwd(), "Kconfiglib")

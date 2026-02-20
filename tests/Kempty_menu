@@ -1,0 +1,17 @@
+config FOO
+    bool
+    default y
+
+menu "Populated Menu"
+
+config BAR
+    bool
+
+endmenu
+
+menu "Empty Menu"
+endmenu
+
+config BAZ
+    bool
+    default y

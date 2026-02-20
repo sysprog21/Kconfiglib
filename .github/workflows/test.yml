@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         # NOTE: Windows runs only headless tests (no kernel tree, no Unix
-        #       shell). Linux/macOS run selftests, compatibility tests, and
+        #       shell). Linux/macOS run selftests, conformance tests, and
         #       example scripts.
         target:
         - python: '3.12'
@@ -93,7 +93,7 @@ jobs:
       if: ${{ matrix.target.headless-only != true }}
       working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
       run: |
-        python -m pytest tests/ -v --tb=short --ignore=tests/test_compat.py
+        python -m pytest tests/ -v --tb=short --ignore=tests/test_conformance.py
 
     - name: Apply Linux Kconfig Makefile patch
       # Skip for Windows (headless-only mode)
@@ -101,7 +101,14 @@ jobs:
       run: |
         git apply Kconfiglib/makefile.patch
 
-    - name: Run compatibility tests and example scripts
+    - name: Build kernel C kconfig tools
+      if: ${{ matrix.target.headless-only != true }}
+      run: |
+        ${MAKE:-make} -j"$(getconf _NPROCESSORS_ONLN)" ARCH=x86 ${LD:+LD=$LD} allnoconfig
+        test -x scripts/kconfig/conf
+        rm -f .config .config.old
+
+    - name: Run conformance tests and example scripts
       # Skip for Windows (headless-only mode)
       if: ${{ matrix.target.headless-only != true }}
       run: |

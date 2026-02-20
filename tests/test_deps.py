@@ -59,7 +59,7 @@ def test_referenced():
         c.syms["INT_REFS"].nodes[0], "A", "B", "C", "D", "E", "F", "G", "H", "y"
     )
 
-    verify_refs(c.syms["CHOICE_REF"].nodes[0], "CHOICE")
+    verify_refs(c.syms["CHOICE_REF"].nodes[0], "y")
 
     verify_refs(c.menus[0], "A", "B", "C", "D")
 
@@ -219,13 +219,12 @@ config G
 
 config H
 \tbool "H"
-\tdepends on I && <choice>
+\tdepends on I
 
 ...depends on the choice symbol I (defined at tests/Kdeploop10:41), with definition...
 
 config I
 \tbool "I"
-\tdepends on <choice>
 
 ...depends on <choice> (defined at tests/Kdeploop10:38), with definition...
 

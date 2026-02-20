@@ -438,13 +438,13 @@ Some optional warnings can be controlled via environment variables:
     that all hex literals must be prefixed with "0x" or "0X", to make it
     possible to distinguish them from symbol references.
 
+    KCONFIG_STRICT is an older alias for this environment variable, supported
+    for backwards compatibility.
+
     Some projects (e.g. the Linux kernel) use multiple Kconfig trees with many
     shared Kconfig files, leading to some safe undefined symbol references.
     KCONFIG_WARN_UNDEF is useful in projects that only have a single Kconfig
     tree though.
-
-    KCONFIG_STRICT is an older alias for this environment variable, supported
-    for backwards compatibility.
 
   - KCONFIG_WARN_UNDEF_ASSIGN: If set to 'y', warnings will be generated for
     all assignments to undefined symbols within .config files. By default, no
@@ -667,10 +667,8 @@ class Kconfig(object):
       The predefined constant symbols n/m/y. Also available in const_syms.
 
     modules:
-      The Symbol instance for the modules symbol. Currently hardcoded to
-      MODULES, which is backwards compatible. Kconfiglib will warn if
-      'option modules' is set on some other symbol. Tell me if you need proper
-      'option modules' support.
+      The Symbol instance for the modules symbol. Hardcoded to MODULES.
+      Kconfiglib will warn if 'option modules' is set on some other symbol.
 
       'modules' is never None. If the MODULES symbol is not explicitly defined,
       its tri_value will be 0 (n), as expected.
@@ -1154,7 +1152,6 @@ class Kconfig(object):
         # KCONFIG_STRICT is an older alias for KCONFIG_WARN_UNDEF, supported
         # for backwards compatibility
         if os.getenv("KCONFIG_WARN_UNDEF") == "y" or os.getenv("KCONFIG_STRICT") == "y":
-
             self._check_undef_syms()
 
         # Build Symbol._dependents for all symbols and choices
@@ -1573,9 +1570,6 @@ class Kconfig(object):
             if not sym._write_to_conf:
                 continue
 
-            if sym.is_transitional:
-                continue
-
             if sym.orig_type in _BOOL_TRISTATE:
                 if val == "y":
                     add("#define {}{} 1\n".format(self.config_prefix, sym.name))
@@ -1754,6 +1748,14 @@ class Kconfig(object):
                 add("\n#\n# {}\n#\n".format(node.prompt[0]))
                 after_end_comment = False
 
+                # Empty menus (no children) still need an "end of" comment
+                # to match the C tools. Normally the comment is emitted when
+                # ascending back up from children, but that never happens
+                # for a childless menu.
+                if item is MENU and not node.list:
+                    add("# end of {}\n".format(node.prompt[0]))
+                    after_end_comment = True
+
     def write_min_config(self, filename, header=None):
         """
         Writes out a "minimal" configuration file, omitting symbols whose value
@@ -1802,9 +1804,6 @@ class Kconfig(object):
         add = chunks.append
 
         for sym in self.unique_defined_syms:
-            if sym.is_transitional:
-                continue
-
             # Skip symbols that cannot be changed. Only check
             # non-choice symbols, as selects don't affect choice
             # symbols.
@@ -1908,9 +1907,6 @@ class Kconfig(object):
             # instead, to avoid accessing the internal _write_to_conf variable
             # (though it's likely to keep working).
             val = sym.str_value
-
-            if sym.is_transitional:
-                continue
 
             # n tristate values do not get written to auto.conf and autoconf.h,
             # making a missing symbol logically equivalent to n
@@ -2430,17 +2426,8 @@ class Kconfig(object):
         # to the previous token. See _STRING_LEX for why this is needed.
         token = _get_keyword(match.group(1))
         if not token:
-            # Backwards compatibility with old versions of the C tools, which
-            # (accidentally) accepted stuff like "--help--" and "-help---".
-            # This was fixed in the C tools by commit c2264564 ("kconfig: warn
-            # of unhandled characters in Kconfig commands"), committed in July
-            # 2015, but it seems people still run Kconfiglib on older kernels.
-            if s.strip(" \t\n-") == "help":
-                return (_T_HELP, None)
-
-            # If the first token is not a keyword (and not a weird help token),
-            # we have a preprocessor variable assignment (or a bare macro on a
-            # line)
+            # If the first token is not a keyword, we have a preprocessor
+            # variable assignment (or a bare macro on a line)
             self._parse_assignment(s)
             return (None,)
 
@@ -3681,10 +3668,9 @@ class Kconfig(object):
             # to).
             depend_on(sym, sym.direct_dep)
 
-            # In addition to the above, choice symbols depend on the choice
-            # they're in, but that's handled automatically since the Choice is
-            # propagated to the conditions of the properties before
-            # _build_dep() runs.
+            # Choice symbols also depend on their parent choice (and vice
+            # versa).  This bidirectional link is added in _add_choice_deps()
+            # after dependency loop detection.
 
         for choice in self.unique_choices:
             # Choices depend on the following:
@@ -3699,9 +3685,13 @@ class Kconfig(object):
                 depend_on(choice, cond)
 
     def _add_choice_deps(self):
-        # Choices also depend on the choice symbols themselves, because the
-        # y-mode selection of the choice might change if a choice symbol's
-        # visibility changes.
+        # Choices and their member symbols have a bidirectional dependency:
+        #
+        #  - When a choice symbol's visibility changes, the choice selection
+        #    might change  (member -> choice).
+        #
+        #  - When the choice's mode or selection changes, member values
+        #    change  (choice -> member).
         #
         # We add these dependencies separately after dependency loop detection.
         # The invalidation algorithm can handle the resulting
@@ -3711,6 +3701,7 @@ class Kconfig(object):
         for choice in self.unique_choices:
             for sym in choice.syms:
                 sym._dependents.add(choice)
+                choice._dependents.add(sym)
 
     def _invalidate_all(self):
         # Undefined symbols never change value and don't need to be
@@ -3811,14 +3802,14 @@ class Kconfig(object):
     def _propagate_deps(self, node, visible_if):
         # Propagates 'node's dependencies to its child menu nodes
 
-        # If the parent node holds a Choice, we use the Choice itself as the
-        # parent dependency. This makes sense as the value (mode) of the choice
-        # limits the visibility of the contained choice symbols. The C
-        # implementation works the same way.
-        #
-        # Due to the similar interface, Choice works as a drop-in replacement
-        # for Symbol here.
-        basedep = node.item if node.item.__class__ is Choice else node.dep
+        # Always use the node's dependency expression as the base dependency
+        # for propagation.  For choices this means propagating the choice's
+        # 'depends on' condition (e.g. X86_32) -- not the Choice object --
+        # so that member visibility is determined by their own prompts gated
+        # by the choice's dependency, matching _menu_finalize() in
+        # scripts/kconfig/menu.c.  The choice mode only affects member
+        # values, handled separately in sym_calc_choice / _selection().
+        basedep = node.dep
 
         cur = node.list
         while cur:
@@ -4577,14 +4568,22 @@ class Symbol(object):
             if vis and self.user_value:
                 user_val = int(self.user_value, base)
                 if has_active_range and not low <= user_val <= high:
+                    # sym_validate_range() in scripts/kconfig/symbol.c
+                    # (Linux) clamps the value to the nearest range bound
+                    # rather than falling back to defaults.
                     num2str = str if base == 10 else hex
+                    clamp_to = low if user_val < low else high
+                    val = num2str(clamp_to)
+                    use_defaults = False
+                    self._origin = _T_CONFIG, self.user_loc
                     self.kconfig._warn(
-                        "user value {} on the {} symbol {} ignored due to "
-                        "being outside the active range ([{}, {}]) -- falling "
-                        "back on defaults".format(
+                        "user value {} on the {} symbol {} clamped to {} due "
+                        "to being outside the active range "
+                        "([{}, {}])".format(
                             num2str(user_val),
                             TYPE_TO_STR[self.orig_type],
                             self.name_and_loc,
+                            num2str(clamp_to),
                             num2str(low),
                             num2str(high),
                         )
@@ -4618,6 +4617,9 @@ class Symbol(object):
                         break
                 else:
                     val_num = 0  # strtoll() on empty string
+                    # Match the C implementation, which initializes
+                    # newval.val = "0" for S_INT and "0x0" for S_HEX
+                    val = "0" if self.orig_type is INT else "0x0"
                     self._origin = _T_DEFAULT, None
 
                 # This clamping procedure runs even if there's no default
@@ -4720,13 +4722,16 @@ class Symbol(object):
                             self._origin = _T_DEFAULT, loc
                         break
 
-                # Weak reverse dependencies are only considered if our
-                # direct dependencies are met
+                # Weak reverse dependencies (imply).  The C
+                # implementation always sets SYMBOL_WRITE when the
+                # implied value is non-zero, even when the direct
+                # dependencies gate the actual value to zero.
                 dep_val = expr_value(self.weak_rev_dep)
-                if dep_val and expr_value(self.direct_dep):
-                    val = max(dep_val, val)
+                if dep_val:
                     self._write_to_conf = True
-                    self._origin = _T_IMPLY, None  # expanded later
+                    if expr_value(self.direct_dep):
+                        val = max(dep_val, val)
+                        self._origin = _T_IMPLY, None  # expanded later
 
             # Reverse (select-related) dependencies take precedence
             dep_val = expr_value(self.rev_dep)
@@ -4743,18 +4748,15 @@ class Symbol(object):
             if val == 1 and (self.type is BOOL or expr_value(self.weak_rev_dep) == 2):
                 val = 2
 
-        elif vis == 2:
-            # Visible choice symbol in y-mode choice. The choice mode limits
-            # the visibility of choice symbols, so it's sufficient to just
-            # check the visibility of the choice symbols themselves.
+        elif vis:
+            # Visible choice symbol.  sym_calc_choice() in
+            # scripts/kconfig/symbol.c (Linux) assigns yes/no to each
+            # visible member based on whether it is the selected symbol,
+            # regardless of the choice's mode (y or m).
             val = 2 if self.choice.selection is self else 0
             self._origin = (
                 self.choice._origin if self.choice.selection is self else None
             )
-
-        elif vis and self.user_value:
-            # Visible choice symbol in m-mode choice, with set non-0 user value
-            val = 1
 
         self._cached_tri_val = val
         return val
@@ -4822,9 +4824,6 @@ class Symbol(object):
         # hidden function call due to property magic.
         val = self.str_value
         if not self._write_to_conf:
-            return ""
-
-        if self.is_transitional:
             return ""
 
         if self.orig_type in _BOOL_TRISTATE:
@@ -5139,11 +5138,15 @@ class Symbol(object):
         if not vis:
             return ()
 
+        # sym_calc_choice() in scripts/kconfig/symbol.c (Linux) assigns
+        # yes/no values to all visible choice members, so the only
+        # user-settable value is y (selecting the member).
+        if self.choice:
+            return (2,)
+
         rev_dep_val = expr_value(self.rev_dep)
 
         if vis == 2:
-            if self.choice:
-                return (2,)
 
             if not rev_dep_val:
                 if self.type is BOOL or expr_value(self.weak_rev_dep) == 2:
@@ -5265,6 +5268,13 @@ class Symbol(object):
             for default, cond, _ in self.defaults:
                 if expr_value(cond):
                     return default.str_value
+
+            # sym_get_string_default() in scripts/kconfig/symbol.c (Linux)
+            # returns "0" for INT and "0x0" for HEX when no default exists.
+            if self.orig_type is INT:
+                return "0"
+            if self.orig_type is HEX:
+                return "0x0"
 
         return ""
 
@@ -5765,18 +5775,47 @@ class Choice(object):
         # Worker function for the 'selection' attribute
 
         # Warning: See Symbol._rec_invalidate(), and note that this is a hidden
-        # function call (property magic)
-        if self.tri_value != 2:
-            # Not in y mode, so no selection
-            return None
+        # function call (property magic).  Accessing self.visibility ensures
+        # _cached_vis is set, which the invalidation system uses as the flag
+        # for "has cached values that need clearing".
+        self.visibility
 
-        # Use the user selection if it's visible
+        # sym_calc_choice() in scripts/kconfig/symbol.c (Linux) computes
+        # the selection for any choice that has visible members, regardless
+        # of the choice's own mode.  An invisible choice prompt (e.g. gated
+        # by EXPERT) does not prevent the default selection from being
+        # written to .config when the choice's dependency (e.g. X86_32)
+        # is met.
+
+        # Step 1: use the user selection if it's visible
         if self.user_selection and self.user_selection.visibility:
             self._origin = _T_CONFIG, self.user_loc
             return self.user_selection
 
-        # Otherwise, check if we have a default
-        return self._selection_from_defaults()
+        # Step 2: default (explicit or first visible member), but skip if
+        # the user explicitly set that symbol to n
+        res = self._selection_from_defaults()
+        if res is not None:
+            if res.user_value is not None and res.user_value == 0:
+                res = None
+
+        # Step 3: first visible member that the user hasn't touched
+        if res is None:
+            for sym in self.syms:
+                if sym.visibility and sym.user_value is None:
+                    self._origin = _T_DEFAULT, None
+                    res = sym
+                    break
+
+        # Step 4: last visible member (absolute fallback)
+        if res is None:
+            for sym in reversed(self.syms):
+                if sym.visibility:
+                    self._origin = _T_DEFAULT, None
+                    res = sym
+                    break
+
+        return res
 
     def _selection_from_defaults(self):
         # Check if we have a default
@@ -6277,8 +6316,7 @@ class Variable(object):
       KconfigError if the expansion seems to be stuck in a loop.
 
       Accessing this field is the same as calling expanded_value_w_args() with
-      no arguments. I hadn't considered function arguments when adding it. It
-      is retained for backwards compatibility though.
+      no arguments. It is retained for backwards compatibility.
 
     is_recursive:
       True if the variable is recursive (defined with =).
@@ -6677,18 +6715,10 @@ def _visibility(sc):
         if node.prompt:
             vis = max(vis, expr_value(node.prompt[1]))
 
-    if sc.__class__ is Symbol and sc.choice:
-        if (
-            sc.choice.orig_type is TRISTATE
-            and sc.orig_type is not TRISTATE
-            and sc.choice.tri_value != 2
-        ):
-            # Non-tristate choice symbols are only visible in y mode
-            return 0
-
-        if sc.orig_type is TRISTATE and vis == 1 and sc.choice.tri_value == 2:
-            # Choice symbols with m visibility are not visible in y mode
-            return 0
+    # For choice values, sym_calc_visibility() in scripts/kconfig/symbol.c
+    # (Linux) returns immediately after computing prompt visibility -- no
+    # additional capping based on the choice's mode.  The m-to-y promotion
+    # for non-tristate types still applies.
 
     # Promote m to y if we're dealing with a non-tristate (possibly due to
     # modules being disabled)

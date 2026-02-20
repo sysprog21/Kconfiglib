@@ -24,12 +24,14 @@ def main():
     kconf.warn = False
 
     for sym in kconf.unique_defined_syms:
+        # Skip choice member symbols -- conf_set_all_new_symbols() in
+        # scripts/kconfig/conf.c (Linux) never sets SYMBOL_DEF_USER on
+        # choice values, leaving the choice selection logic to pick the
+        # default.
+        if sym.choice:
+            continue
         if sym.orig_type == kconfiglib.BOOL:
-            # 'bool' choice symbols get their default value, as determined by
-            # e.g. 'default's on the choice
-            if not sym.choice:
-                # All other bool symbols get set to 'y', like for allyesconfig
-                sym.set_value(2)
+            sym.set_value(2)
         elif sym.orig_type == kconfiglib.TRISTATE:
             sym.set_value(1)
 
