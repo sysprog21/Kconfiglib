@@ -1,8 +1,9 @@
 """Tests for the 'transitional' keyword (Linux >= 6.18).
 
 Transitional symbols are read from old .config files to populate new symbol
-defaults, but must never appear in generated .config, autoconf.h, or
-min-config output.
+defaults.  The 'transitional' flag only affects UI display (menuconfig) --
+transitional symbols are still written to .config, autoconf.h, and min-config
+output, matching the C tools behavior.
 """
 
 import os
@@ -45,7 +46,7 @@ def test_transitional_migration():
 
 
 def test_transitional_write_config():
-    """Transitional symbols absent from write_config output; normal symbols present."""
+    """Transitional symbols appear in write_config output (matching C tools)."""
     kconf = _load(CONFIG_PATH)
 
     with tempfile.NamedTemporaryFile(mode="r", suffix=".config", delete=False) as f:
@@ -57,15 +58,15 @@ def test_transitional_write_config():
     finally:
         os.unlink(tmppath)
 
-    assert "LEGACY_BOOL" not in content
-    assert "LEGACY_INT" not in content
+    assert "LEGACY_BOOL" in content
+    assert "LEGACY_INT" in content
     assert "NEW_BOOL" in content
     assert "NORMAL_BOOL" in content
     assert "NORMAL_INT" in content
 
 
 def test_transitional_write_autoconf():
-    """Transitional symbols absent from write_autoconf output."""
+    """Transitional symbols appear in write_autoconf output (matching C tools)."""
     kconf = _load(CONFIG_PATH)
 
     with tempfile.NamedTemporaryFile(mode="r", suffix=".h", delete=False) as f:
@@ -77,14 +78,13 @@ def test_transitional_write_autoconf():
     finally:
         os.unlink(tmppath)
 
-    assert "LEGACY_BOOL" not in content
-    assert "LEGACY_INT" not in content
-    # NEW_BOOL=y should produce a #define
+    assert "LEGACY_BOOL" in content
+    assert "LEGACY_INT" in content
     assert "NEW_BOOL" in content
 
 
 def test_transitional_write_min_config():
-    """Transitional symbols absent from write_min_config output."""
+    """Transitional symbols appear in write_min_config output (matching C tools)."""
     kconf = _load(CONFIG_PATH)
 
     with tempfile.NamedTemporaryFile(mode="r", suffix=".config", delete=False) as f:
@@ -96,17 +96,16 @@ def test_transitional_write_min_config():
     finally:
         os.unlink(tmppath)
 
-    assert "LEGACY_BOOL" not in content
-    assert "LEGACY_INT" not in content
+    assert "LEGACY_BOOL" in content
+    assert "LEGACY_INT" in content
 
 
 def test_transitional_config_string():
-    """config_string returns '' for transitional symbols."""
+    """config_string returns normal output for transitional symbols."""
     kconf = _load(CONFIG_PATH)
 
-    assert kconf.syms["LEGACY_BOOL"].config_string == ""
-    assert kconf.syms["LEGACY_INT"].config_string == ""
-    # Normal symbols should have non-empty config_string
+    assert kconf.syms["LEGACY_BOOL"].config_string != ""
+    assert kconf.syms["LEGACY_INT"].config_string != ""
     assert kconf.syms["NORMAL_BOOL"].config_string != ""
     assert kconf.syms["NORMAL_INT"].config_string != ""
 
