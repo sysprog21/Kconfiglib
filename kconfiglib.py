@@ -4568,14 +4568,22 @@ class Symbol(object):
             if vis and self.user_value:
                 user_val = int(self.user_value, base)
                 if has_active_range and not low <= user_val <= high:
+                    # sym_validate_range() in scripts/kconfig/symbol.c
+                    # (Linux) clamps the value to the nearest range bound
+                    # rather than falling back to defaults.
                     num2str = str if base == 10 else hex
+                    clamp_to = low if user_val < low else high
+                    val = num2str(clamp_to)
+                    use_defaults = False
+                    self._origin = _T_CONFIG, self.user_loc
                     self.kconfig._warn(
-                        "user value {} on the {} symbol {} ignored due to "
-                        "being outside the active range ([{}, {}]) -- falling "
-                        "back on defaults".format(
+                        "user value {} on the {} symbol {} clamped to {} due "
+                        "to being outside the active range "
+                        "([{}, {}])".format(
                             num2str(user_val),
                             TYPE_TO_STR[self.orig_type],
                             self.name_and_loc,
+                            num2str(clamp_to),
                             num2str(low),
                             num2str(high),
                         )
@@ -5260,6 +5268,13 @@ class Symbol(object):
             for default, cond, _ in self.defaults:
                 if expr_value(cond):
                     return default.str_value
+
+            # sym_get_string_default() in scripts/kconfig/symbol.c (Linux)
+            # returns "0" for INT and "0x0" for HEX when no default exists.
+            if self.orig_type is INT:
+                return "0"
+            if self.orig_type is HEX:
+                return "0x0"
 
         return ""
 

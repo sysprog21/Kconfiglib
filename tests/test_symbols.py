@@ -293,10 +293,10 @@ def test_ranges():
     # Avoid warnings for assigning values outside the active range
     c.warn = False
 
-    def verify_range(sym_name, low, high, default):
+    def verify_range(sym_name, low, high):
         # Verifies that all values in the range low-high can be assigned,
-        # and that assigning values outside the range reverts the value back to
-        # default.
+        # and that assigning values outside the range clamps to the nearest
+        # bound (matching sym_validate_range() in scripts/kconfig/symbol.c).
 
         is_hex = c.syms[sym_name].type == HEX
 
@@ -308,38 +308,35 @@ def test_ranges():
                 assign_and_verify_user_value(c, sym_name, hex(i), hex(i), True)
 
         # Verify that assigning a user value just outside the range causes
-        # defaults to be used
-
-        if default is None:
-            default_str = ""
-        elif is_hex:
-            default_str = hex(default)
-        else:
-            default_str = str(default)
+        # clamping to the nearest bound
 
         if is_hex:
             too_low_str = hex(low - 1)
             too_high_str = hex(high + 1)
+            low_str = hex(low)
+            high_str = hex(high)
         else:
             too_low_str = str(low - 1)
             too_high_str = str(high + 1)
+            low_str = str(low)
+            high_str = str(high)
 
-        assign_and_verify_value(c, sym_name, too_low_str, default_str)
-        assign_and_verify_value(c, sym_name, too_high_str, default_str)
+        assign_and_verify_value(c, sym_name, too_low_str, low_str)
+        assign_and_verify_value(c, sym_name, too_high_str, high_str)
 
-    verify_range("HEX_RANGE_10_20_LOW_DEFAULT", 0x10, 0x20, 0x10)
-    verify_range("HEX_RANGE_10_20_HIGH_DEFAULT", 0x10, 0x20, 0x20)
-    verify_range("HEX_RANGE_10_20_OK_DEFAULT", 0x10, 0x20, 0x15)
+    verify_range("HEX_RANGE_10_20_LOW_DEFAULT", 0x10, 0x20)
+    verify_range("HEX_RANGE_10_20_HIGH_DEFAULT", 0x10, 0x20)
+    verify_range("HEX_RANGE_10_20_OK_DEFAULT", 0x10, 0x20)
 
-    verify_range("INT_RANGE_10_20_LOW_DEFAULT", 10, 20, 10)
-    verify_range("INT_RANGE_10_20_HIGH_DEFAULT", 10, 20, 20)
-    verify_range("INT_RANGE_10_20_OK_DEFAULT", 10, 20, 15)
+    verify_range("INT_RANGE_10_20_LOW_DEFAULT", 10, 20)
+    verify_range("INT_RANGE_10_20_HIGH_DEFAULT", 10, 20)
+    verify_range("INT_RANGE_10_20_OK_DEFAULT", 10, 20)
 
-    verify_range("HEX_RANGE_10_20", 0x10, 0x20, 0x10)
+    verify_range("HEX_RANGE_10_20", 0x10, 0x20)
 
-    verify_range("INT_RANGE_10_20", 10, 20, 10)
-    verify_range("INT_RANGE_0_10", 0, 10, 0)
-    verify_range("INT_RANGE_NEG_10_10", -10, 10, 0)
+    verify_range("INT_RANGE_10_20", 10, 20)
+    verify_range("INT_RANGE_0_10", 0, 10)
+    verify_range("INT_RANGE_NEG_10_10", -10, 10)
 
     # Dependent ranges
 
@@ -355,8 +352,8 @@ def test_ranges():
     verify_value(c, "HEX_RANGE_10_40_DEPENDENT", "0x15")
     verify_value(c, "INT_RANGE_10_40_DEPENDENT", "15")
     c.unset_values()
-    verify_range("HEX_RANGE_10_40_DEPENDENT", 0x10, 0x40, 0x10)
-    verify_range("INT_RANGE_10_40_DEPENDENT", 10, 40, 10)
+    verify_range("HEX_RANGE_10_40_DEPENDENT", 0x10, 0x40)
+    verify_range("INT_RANGE_10_40_DEPENDENT", 10, 40)
 
     # Ranges and symbols defined in multiple locations
 
