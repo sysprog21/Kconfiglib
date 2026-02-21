@@ -88,12 +88,17 @@ jobs:
         path: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
 
     - name: Run pytest selftests
-      # Skip on Windows: several tests depend on Unix shell ($(shell,...)),
-      # gcc, and forward-slash paths that are unavailable on Windows CI.
-      if: ${{ matrix.target.headless-only != true }}
       working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
       run: |
-        python -m pytest tests/ -v --tb=short --ignore=tests/test_conformance.py
+        if [ "${{ matrix.target.headless-only }}" == "true" ]; then
+          # Windows: portable subset -- excludes tests that need gcc or
+          # Unix shell commands (Kpreprocess uses $(shell,...) with
+          # bash-specific syntax).
+          python -m pytest tests/test_preprocess.py -v --tb=short \
+            -k "test_user_defined or test_success_failure or test_python_fn or test_kconfig_warn"
+        else
+          python -m pytest tests/ -v --tb=short --ignore=tests/test_conformance.py
+        fi
 
     - name: Apply Linux Kconfig Makefile patch
       # Skip for Windows (headless-only mode)
