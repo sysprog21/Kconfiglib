@@ -50,14 +50,18 @@ pytestmark = [
 
 # ---------------------------------------------------------------------------
 # Configuration flags.
-# Override via environment variables if needed:
-#   KCONFIGLIB_OBSESSIVE=1          -- test every arch/defconfig combination
-#   KCONFIGLIB_OBSESSIVE_MIN_CONFIG=1
-#   KCONFIGLIB_LOG=1                -- log defconfig failures to a file
+# Override via environment variables:
+#   KCONFIGLIB_OBSESSIVE=1   -- test all architectures (default: 4 representative)
+#   KCONFIGLIB_MIN_CONFIG=1  -- test_min_config uses representative arch set
+#                               (default: x86_64 only; saves ~10 min)
+#   KCONFIGLIB_LOG=1         -- log defconfig failures to a file
 # ---------------------------------------------------------------------------
 
 obsessive = os.environ.get("KCONFIGLIB_OBSESSIVE", "") == "1"
-obsessive_min_config = os.environ.get("KCONFIGLIB_OBSESSIVE_MIN_CONFIG", "") == "1"
+min_config_full = (
+    os.environ.get("KCONFIGLIB_MIN_CONFIG", "") == "1"
+    or os.environ.get("KCONFIGLIB_OBSESSIVE_MIN_CONFIG", "") == "1"
+)
 log = os.environ.get("KCONFIGLIB_LOG", "") == "1"
 
 
@@ -131,6 +135,43 @@ def all_arch_srcarch():
     yield ("sparc64", "sparc")
 
     yield ("sh64", "sh")
+
+
+# ---------------------------------------------------------------------------
+# Arch pair pre-computation for parametrization.
+#
+# By default, only a representative subset of architectures is tested to
+# keep CI fast (~4-6 min instead of ~29 min).  Set KCONFIGLIB_OBSESSIVE=1
+# to test every architecture.
+#
+# test_min_config additionally defaults to a single arch (x86_64); set
+# KCONFIGLIB_MIN_CONFIG=1 to expand it to the representative set.
+# ---------------------------------------------------------------------------
+
+_REPRESENTATIVE_ARCHS = {"x86_64", "arm64", "riscv", "arm"}
+
+
+def _collect_all_arch_pairs():
+    """Collect all (arch, srcarch) pairs; empty list outside a kernel tree."""
+    try:
+        return list(all_arch_srcarch())
+    except (FileNotFoundError, OSError):
+        return []
+
+
+_ALL_ARCH_PAIRS = _collect_all_arch_pairs()
+
+if obsessive:
+    _DEFAULT_PAIRS = _ALL_ARCH_PAIRS
+else:
+    _DEFAULT_PAIRS = [(a, s) for a, s in _ALL_ARCH_PAIRS if a in _REPRESENTATIVE_ARCHS]
+
+if obsessive:
+    _MIN_CONFIG_PAIRS = _ALL_ARCH_PAIRS
+elif min_config_full:
+    _MIN_CONFIG_PAIRS = list(_DEFAULT_PAIRS)
+else:
+    _MIN_CONFIG_PAIRS = [(a, s) for a, s in _ALL_ARCH_PAIRS if a == "x86_64"]
 
 
 def run_conf_and_compare(script, conf_flag, arch):
@@ -291,227 +332,238 @@ _ALLCONFIG_CASES = [
 def test_allconfig(script, conf_flag):
     """Verify that a Kconfiglib *config script generates the same .config
     as the corresponding 'make <conf_flag>', for each architecture.
+
+    Uses the representative arch set by default; set KCONFIGLIB_OBSESSIVE=1
+    for full coverage.
     """
-    for arch, srcarch in all_arch_srcarch():
+    for arch, srcarch in _DEFAULT_PAIRS:
         os.environ["ARCH"] = arch
         os.environ["SRCARCH"] = srcarch
         rm_configs()
         run_conf_and_compare(script, conf_flag, arch)
 
 
-def test_defconfig():
+@pytest.mark.parametrize(
+    "arch,srcarch",
+    _DEFAULT_PAIRS,
+    ids=[a for a, _ in _DEFAULT_PAIRS],
+)
+def test_defconfig(arch, srcarch):
     """Verify that Kconfiglib generates the same .config as
-    scripts/kconfig/conf, for each architecture/defconfig pair.
+    scripts/kconfig/conf, for each defconfig in the given architecture.
 
-    In obsessive mode (KCONFIGLIB_OBSESSIVE=1), this test includes
-    nonsensical groupings of arches with defconfigs from other arches
-    (every arch/defconfig combination) and takes an order of magnitude
-    longer to run.
+    Parametrized by architecture so pytest shows per-arch timing and
+    supports selective re-runs (e.g. ``-k "test_defconfig[x86_64]"``).
 
-    With logging enabled (KCONFIGLIB_LOG=1), failures are appended to
-    test_defconfig_fails in the kernel root.
+    With KCONFIGLIB_OBSESSIVE=1, tests all architectures and includes
+    cross-arch defconfig combinations.  With KCONFIGLIB_LOG=1, failures
+    are appended to test_defconfig_fails in the kernel root.
     """
-    for arch, srcarch in all_arch_srcarch():
-        os.environ["ARCH"] = arch
-        os.environ["SRCARCH"] = srcarch
+    os.environ["ARCH"] = arch
+    os.environ["SRCARCH"] = srcarch
+    rm_configs()
+
+    try:
+        kconf = Kconfig()
+    except KconfigError:
+        pytest.skip(f"Kconfig parsing failed for {arch}")
+
+    for defconfig in collect_defconfigs(srcarch, obsessive):
         rm_configs()
 
-        try:
-            kconf = Kconfig()
-        except KconfigError:
-            print(f"  {arch}: Kconfig parsing failed, skipping")
-            continue
+        kconf.load_config(defconfig)
+        kconf.write_config("._config")
+        shell(f"scripts/kconfig/conf --defconfig='{defconfig}' Kconfig")
 
-        for defconfig in collect_defconfigs(srcarch, obsessive):
-            rm_configs()
+        label = f"  {arch:14}with {defconfig:60} "
 
-            kconf.load_config(defconfig)
-            kconf.write_config("._config")
-            shell(f"scripts/kconfig/conf --defconfig='{defconfig}' Kconfig")
-
-            label = f"  {arch:14}with {defconfig:60} "
-
-            if equal_configs():
-                print(label + "OK")
-            else:
-                if log:
-                    with open("test_defconfig_fails", "a") as fail_log:
-                        fail_log.write(f"{arch} with {defconfig} did not match\n")
-                pytest.fail(label + "FAIL")
+        if equal_configs():
+            print(label + "OK")
+        else:
+            if log:
+                with open("test_defconfig_fails", "a") as fail_log:
+                    fail_log.write(f"{arch} with {defconfig} did not match\n")
+            pytest.fail(label + "FAIL")
 
 
-def test_min_config():
+@pytest.mark.parametrize(
+    "arch,srcarch",
+    _MIN_CONFIG_PAIRS,
+    ids=[a for a, _ in _MIN_CONFIG_PAIRS],
+)
+def test_min_config(arch, srcarch):
     """Verify that Kconfiglib generates the same .config as
-    'make savedefconfig' for each architecture/defconfig pair.
+    'make savedefconfig' for each defconfig in the given architecture.
 
-    NOTE: This test is disabled in the original suite due to a bug in the
-    C tools for a few defconfigs.  It is included here for completeness
-    and can be run explicitly.
+    By default only x86_64 is tested.  Set KCONFIGLIB_MIN_CONFIG=1 for
+    the representative arch set or KCONFIGLIB_OBSESSIVE=1 for all
+    architectures.
     """
-    for arch, srcarch in all_arch_srcarch():
-        os.environ["ARCH"] = arch
-        os.environ["SRCARCH"] = srcarch
+    os.environ["ARCH"] = arch
+    os.environ["SRCARCH"] = srcarch
+    rm_configs()
+
+    try:
+        kconf = Kconfig()
+    except KconfigError:
+        pytest.skip(f"Kconfig parsing failed for {arch}")
+
+    for defconfig in collect_defconfigs(srcarch, min_config_full or obsessive):
         rm_configs()
 
-        try:
-            kconf = Kconfig()
-        except KconfigError:
-            print(f"  {arch}: Kconfig parsing failed, skipping")
-            continue
+        kconf.load_config(defconfig)
+        kconf.write_min_config("._config")
 
-        for defconfig in collect_defconfigs(srcarch, obsessive_min_config):
-            rm_configs()
+        shutil.copyfile(defconfig, ".config")
+        shell("scripts/kconfig/conf --savedefconfig=.config Kconfig")
 
-            kconf.load_config(defconfig)
-            kconf.write_min_config("._config")
+        label = f"  {arch:14}with {defconfig:60} "
 
-            shell(f"cp {defconfig} .config")
-            shell("scripts/kconfig/conf --savedefconfig=.config Kconfig")
-
-            label = f"  {arch:14}with {defconfig:60} "
-
-            if equal_configs():
-                print(label + "OK")
-            else:
-                print(label + "FAIL")
-                pytest.fail(label + "FAIL")
+        if equal_configs():
+            print(label + "OK")
+        else:
+            print(label + "FAIL")
+            pytest.fail(label + "FAIL")
 
 
-def test_sanity():
-    """Do sanity checks on each configuration and call all public methods
-    on all symbols, choices, and menu nodes for all architectures to make
-    sure we never crash or hang.
+@pytest.mark.parametrize(
+    "arch,srcarch",
+    _DEFAULT_PAIRS,
+    ids=[a for a, _ in _DEFAULT_PAIRS],
+)
+def test_sanity(arch, srcarch):
+    """Do sanity checks on the given architecture and call all public methods
+    on all symbols, choices, and menu nodes to make sure we never crash or
+    hang.
+
+    Parametrized by architecture.  Set KCONFIGLIB_OBSESSIVE=1 for all
+    architectures.
     """
-    for arch, srcarch in all_arch_srcarch():
-        os.environ["ARCH"] = arch
-        os.environ["SRCARCH"] = srcarch
-        rm_configs()
+    os.environ["ARCH"] = arch
+    os.environ["SRCARCH"] = srcarch
+    rm_configs()
 
-        print(f"For {arch}...")
+    print(f"For {arch}...")
 
-        try:
-            kconf = Kconfig()
-        except KconfigError:
-            print(f"  {arch}: Kconfig parsing failed, skipping")
-            continue
+    try:
+        kconf = Kconfig()
+    except KconfigError:
+        pytest.skip(f"Kconfig parsing failed for {arch}")
 
-        for sym in kconf.defined_syms:
-            assert sym._visited == 2, (
-                f"{sym.name} has broken dependency loop detection "
-                f"(_visited = {sym._visited})"
+    for sym in kconf.defined_syms:
+        assert sym._visited == 2, (
+            f"{sym.name} has broken dependency loop detection "
+            f"(_visited = {sym._visited})"
+        )
+
+    kconf.modules
+    kconf.defconfig_list
+    kconf.defconfig_filename
+
+    # Exercise warning attribute toggles
+    kconf.warn_assign_redun = True
+    kconf.warn_assign_redun = False
+    kconf.warn_assign_undef = True
+    kconf.warn_assign_undef = False
+    kconf.warn = True
+    kconf.warn = False
+    kconf.warn_to_stderr = True
+    kconf.warn_to_stderr = False
+
+    kconf.mainmenu_text
+    kconf.unset_values()
+
+    kconf.write_autoconf("/dev/null")
+
+    tmpdir = tempfile.mkdtemp()
+    kconf.sync_deps(os.path.join(tmpdir, "deps"))  # Create
+    kconf.sync_deps(os.path.join(tmpdir, "deps"))  # Update
+    shutil.rmtree(tmpdir)
+
+    # -- Verify non-constant symbols (kconf.syms) --
+
+    for key, sym in kconf.syms.items():
+        assert isinstance(key, str), f"weird key '{key}' in syms dict"
+        assert not sym.is_constant, f"{sym.name} in 'syms' and constant"
+        assert (
+            sym not in kconf.const_syms
+        ), f"{sym.name} in both 'syms' and 'const_syms'"
+
+        for dep in sym._dependents:
+            assert (
+                not dep.is_constant
+            ), f"the constant symbol {dep.name} depends on {sym.name}"
+
+        _exercise_sym_api(kconf, sym)
+        sym.user_value
+
+    # -- Verify defined symbols have nodes and correct choice types --
+
+    for sym in kconf.defined_syms:
+        assert sym.nodes, f"{sym.name} is defined but lacks menu nodes"
+
+        if sym.choice:
+            assert sym.orig_type in (
+                BOOL,
+                TRISTATE,
+            ), f"{sym.name} is a choice symbol but not bool/tristate"
+
+    # -- Verify constant symbols (kconf.const_syms) --
+
+    for key, sym in kconf.const_syms.items():
+        assert isinstance(key, str), f"weird key '{key}' in const_syms dict"
+        assert sym.is_constant, f'"{sym.name}" is in const_syms but not marked constant'
+        assert not sym.nodes, f'"{sym.name}" is constant but has menu nodes'
+        assert (
+            not sym._dependents
+        ), f'"{sym.name}" is constant but is a dependency of some symbol'
+        assert not sym.choice, f'"{sym.name}" is constant and a choice symbol'
+
+        _exercise_sym_api(kconf, sym)
+
+    # -- Verify choices --
+
+    for choice in kconf.choices:
+        for sym in choice.syms:
+            assert sym.choice is choice, (
+                f"{sym.name} is in choice.syms but 'sym.choice' is not " "the choice"
             )
+            assert sym.type in (
+                BOOL,
+                TRISTATE,
+            ), f"{sym.name} is a choice symbol but is not a bool/tristate"
 
-        kconf.modules
-        kconf.defconfig_list
-        kconf.defconfig_filename
+        str(choice)
+        repr(choice)
+        choice.str_value
+        choice.tri_value
+        choice.user_value
+        choice.assignable
+        choice.selection
+        choice.type
+        choice.visibility
 
-        # Exercise warning attribute toggles
-        kconf.warn_assign_redun = True
-        kconf.warn_assign_redun = False
-        kconf.warn_assign_undef = True
-        kconf.warn_assign_undef = False
-        kconf.warn = True
-        kconf.warn = False
-        kconf.warn_to_stderr = True
-        kconf.warn_to_stderr = False
+    # -- Walk all menu nodes --
 
-        kconf.mainmenu_text
-        kconf.unset_values()
+    node = kconf.top_node
 
-        kconf.write_autoconf("/dev/null")
+    while True:
+        repr(node)
+        str(node)
+        assert isinstance(node.item, (Symbol, Choice)) or node.item in (
+            MENU,
+            COMMENT,
+        ), f"'{node.item}' appeared as a menu item"
 
-        tmpdir = tempfile.mkdtemp()
-        kconf.sync_deps(os.path.join(tmpdir, "deps"))  # Create
-        kconf.sync_deps(os.path.join(tmpdir, "deps"))  # Update
-        shutil.rmtree(tmpdir)
-
-        # -- Verify non-constant symbols (kconf.syms) --
-
-        for key, sym in kconf.syms.items():
-            assert isinstance(key, str), f"weird key '{key}' in syms dict"
-            assert not sym.is_constant, f"{sym.name} in 'syms' and constant"
-            assert (
-                sym not in kconf.const_syms
-            ), f"{sym.name} in both 'syms' and 'const_syms'"
-
-            for dep in sym._dependents:
-                assert (
-                    not dep.is_constant
-                ), f"the constant symbol {dep.name} depends on {sym.name}"
-
-            _exercise_sym_api(kconf, sym)
-            sym.user_value
-
-        # -- Verify defined symbols have nodes and correct choice types --
-
-        for sym in kconf.defined_syms:
-            assert sym.nodes, f"{sym.name} is defined but lacks menu nodes"
-
-            if sym.choice:
-                assert sym.orig_type in (
-                    BOOL,
-                    TRISTATE,
-                ), f"{sym.name} is a choice symbol but not bool/tristate"
-
-        # -- Verify constant symbols (kconf.const_syms) --
-
-        for key, sym in kconf.const_syms.items():
-            assert isinstance(key, str), f"weird key '{key}' in const_syms dict"
-            assert (
-                sym.is_constant
-            ), f'"{sym.name}" is in const_syms but not marked constant'
-            assert not sym.nodes, f'"{sym.name}" is constant but has menu nodes'
-            assert (
-                not sym._dependents
-            ), f'"{sym.name}" is constant but is a dependency of some symbol'
-            assert not sym.choice, f'"{sym.name}" is constant and a choice symbol'
-
-            _exercise_sym_api(kconf, sym)
-
-        # -- Verify choices --
-
-        for choice in kconf.choices:
-            for sym in choice.syms:
-                assert sym.choice is choice, (
-                    f"{sym.name} is in choice.syms but 'sym.choice' is not "
-                    "the choice"
-                )
-                assert sym.type in (
-                    BOOL,
-                    TRISTATE,
-                ), f"{sym.name} is a choice symbol but is not a bool/tristate"
-
-            str(choice)
-            repr(choice)
-            choice.str_value
-            choice.tri_value
-            choice.user_value
-            choice.assignable
-            choice.selection
-            choice.type
-            choice.visibility
-
-        # -- Walk all menu nodes --
-
-        node = kconf.top_node
-
-        while True:
-            repr(node)
-            str(node)
-            assert isinstance(node.item, (Symbol, Choice)) or node.item in (
-                MENU,
-                COMMENT,
-            ), f"'{node.item}' appeared as a menu item"
-
-            if node.list is not None:
-                node = node.list
-            elif node.next is not None:
-                node = node.next
-            else:
-                while node.parent is not None:
-                    node = node.parent
-                    if node.next is not None:
-                        node = node.next
-                        break
-                else:
+        if node.list is not None:
+            node = node.list
+        elif node.next is not None:
+            node = node.next
+        else:
+            while node.parent is not None:
+                node = node.parent
+                if node.next is not None:
+                    node = node.next
                     break
+            else:
+                break
