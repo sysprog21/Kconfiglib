@@ -1,19 +1,81 @@
-# Test Kbuild toolchain test functions
+# Test Kbuild toolchain test functions and $(python,...) built-in
 
-config TEST_SUCCESS
-	def_bool $(success,true)
-	help
-	  Test success function with command that returns 0
+# --- $(python,...) tests ---
 
-config TEST_FAILURE
-	def_bool $(failure,false)
+config TEST_PYTHON_SUCCESS
+	def_bool $(python,)
 	help
-	  Test failure function with command that returns 0
+	  Empty code string = success = "y"
 
-config TEST_IF_SUCCESS
-	def_bool $(if-success,true,y,n)
+config TEST_PYTHON_ASSERT_PASS
+	def_bool $(python,assert not "")
 	help
-	  Test if-success function with true command
+	  Assertion that passes = "y"
+
+config TEST_PYTHON_ASSERT_FAIL
+	def_bool $(python,assert False)
+	help
+	  Assertion that fails = "n"
+
+config TEST_PYTHON_ENV
+	def_bool $(python,assert os.environ.get('CC'))
+	help
+	  Check env var via os module
+
+config TEST_PYTHON_WHICH
+	def_bool $(python,assert shutil.which('python3') or shutil.which('python'))
+	help
+	  Tool detection via shutil.which
+
+config TEST_PYTHON_RUN
+	def_bool $(python,assert run(sys.executable, '-c', ''))
+	help
+	  Shell-free subprocess via run()
+
+config TEST_PYTHON_RUN_FAIL
+	def_bool $(python,assert not run(sys.executable, '-c', 'raise SystemExit(1)'))
+	help
+	  Verify run() failure detection
+
+config TEST_PYTHON_QUOTE_COMMA
+	def_bool $(python,assert "a,b" == "a,b")
+	help
+	  Commas inside double quotes must not split arguments
+
+config TEST_PYTHON_QUOTE_PAREN
+	def_bool $(python,assert "(" + ")" == "()")
+	help
+	  Parentheses inside quotes must not affect nesting
+
+config TEST_PYTHON_SINGLE_QUOTE
+	def_bool $(python,assert 'x,y' == 'x,y')
+	help
+	  Single-quoted commas must not split arguments
+
+config TEST_PYTHON_ESCAPED_QUOTE
+	def_bool $(python,assert "a\"b" == 'a"b')
+	help
+	  Backslash-escaped quotes must not end quoted region
+
+config TEST_PYTHON_TRIPLE_QUOTE
+	def_bool $(python,assert """a,b"c""" == 'a,b"c')
+	help
+	  Triple-quoted string with comma and embedded quote
+
+config TEST_PYTHON_TRIPLE_SINGLE
+	def_bool $(python,assert '''x,y'z''' == "x,y'z")
+	help
+	  Triple single-quoted string with comma and embedded quote
+
+GREETING = hello
+
+config TEST_PYTHON_MACRO_BEFORE_ESCAPE
+	def_bool $(python,assert "$(GREETING)\n" == "hello\n")
+	help
+	  Macro expansion must happen before backslash-escape processing
+	  inside quoted regions so $(GREETING) is expanded, not skipped.
+
+# --- Toolchain function tests (cc-option, ld-option, etc.) ---
 
 config CC_HAS_WALL
 	def_bool $(cc-option,-Wall)
@@ -56,30 +118,9 @@ config CC_STACK_USAGE_FLAG
 	help
 	  Returns -fstack-usage if supported, empty otherwise
 
-# Test nested function calls
-config TEST_NESTED_SUCCESS_SHELL
-	def_bool $(success,test -n "$(shell,echo test)")
-	help
-	  Test nested success and shell function calls
+# --- Failure cases ---
 
-config TEST_NESTED_IF_SUCCESS
-	def_bool $(if-success,test -z "$(shell,echo)",y,n)
-	help
-	  Test deeply nested function calls with if-success
-
-# Test with environment variables
-config TEST_CC_ENV
-	def_bool $(success,test -n "$CC")
-	help
-	  Test if CC environment variable is set
-
-# Test failure cases
 config TEST_INVALID_OPTION
 	def_bool $(cc-option,--this-option-does-not-exist-xyz)
 	help
 	  Test cc-option with invalid flag (should return n)
-
-config TEST_FAILURE_TRUE
-	def_bool $(failure,true)
-	help
-	  Test failure with true command (should return n)

@@ -4,9 +4,19 @@
 # Preprocessor tests: variable expansion, user-defined functions, Kbuild
 # toolchain test functions, and KCONFIG_WARN_UNDEF.
 
+import os
+import shutil
+import sys
+
 import pytest
 
-from kconfiglib import Kconfig, KconfigError
+from kconfiglib import (
+    Kconfig,
+    KconfigError,
+    _success_fn,
+    _failure_fn,
+    _if_success_fn,
+)
 from conftest import verify_value, verify_str
 
 
@@ -263,22 +273,142 @@ def test_user_defined_functions(monkeypatch):
 # ===========================================================================
 
 
-def test_kbuild_functions():
+def test_kbuild_functions(monkeypatch):
+    cc = (
+        os.environ.get("CC")
+        or shutil.which("cc")
+        or shutil.which("gcc")
+        or shutil.which("clang")
+    )
+    if not cc:
+        pytest.skip("no C compiler found")
+    monkeypatch.setenv("CC", cc)
     c = Kconfig("tests/Kbuild_functions")
 
-    verify_value(c, "TEST_SUCCESS", "y")
-    verify_value(c, "TEST_FAILURE", "y")
-    verify_value(c, "TEST_IF_SUCCESS", "y")
+    # $(python,...) tests
+    verify_value(c, "TEST_PYTHON_SUCCESS", "y")
+    verify_value(c, "TEST_PYTHON_ASSERT_PASS", "y")
+    verify_value(c, "TEST_PYTHON_ASSERT_FAIL", "n")
+    verify_value(c, "TEST_PYTHON_ENV", "y")
+    verify_value(c, "TEST_PYTHON_WHICH", "y")
+    verify_value(c, "TEST_PYTHON_RUN", "y")
+    verify_value(c, "TEST_PYTHON_RUN_FAIL", "y")
 
+    # Quote tracking -- commas/parens inside quotes must not
+    # split macro arguments
+    verify_value(c, "TEST_PYTHON_QUOTE_COMMA", "y")
+    verify_value(c, "TEST_PYTHON_QUOTE_PAREN", "y")
+    verify_value(c, "TEST_PYTHON_SINGLE_QUOTE", "y")
+    verify_value(c, "TEST_PYTHON_ESCAPED_QUOTE", "y")
+    verify_value(c, "TEST_PYTHON_TRIPLE_QUOTE", "y")
+    verify_value(c, "TEST_PYTHON_TRIPLE_SINGLE", "y")
+    verify_value(c, "TEST_PYTHON_MACRO_BEFORE_ESCAPE", "y")
+
+    # Toolchain function tests (shell-free via _run_argv)
     verify_value(c, "CC_HAS_WALL", "y")
     verify_value(c, "CC_HAS_WERROR", "y")
-
-    verify_value(c, "TEST_INVALID_OPTION", "n")
-    verify_value(c, "TEST_FAILURE_TRUE", "n")
-
+    verify_value(c, "CC_HAS_FSTACK_PROTECTOR", "y")
     verify_value(c, "AS_HAS_NOP", "y")
+    verify_value(c, "TEST_INVALID_OPTION", "n")
 
-    verify_value(c, "TEST_NESTED_SUCCESS_SHELL", "y")
+    # ld-option: result is platform-dependent (Apple ld rejects
+    # --version), just verify the symbol was evaluated
+    assert c.syms["LD_HAS_VERSION"].str_value in ("y", "n")
+
+    # cc-option-bit returns the flag itself (string) or ""
+    val = c.syms["CC_STACK_USAGE_FLAG"].str_value
+    assert val in (
+        "-fstack-usage",
+        "",
+    ), "CC_STACK_USAGE_FLAG should be the flag or empty"
+
+    # AS_HAS_MOVQ (x86-64 only) and AS_HAS_CUSTOM_FLAG
+    # (-march=native, compiler-dependent) are intentionally not
+    # asserted here -- results vary by architecture and toolchain.
+
+
+@pytest.fixture(scope="module")
+def kbuild_kconfig():
+    """Load Kbuild_functions once per module -- avoids repeated
+    subprocess toolchain probes across python_fn tests."""
+    return Kconfig("tests/Kbuild_functions", warn_to_stderr=False)
+
+
+def test_success_failure_fns():
+    """Test success/failure/if-success functions directly with
+    sys.executable as a portable true/false replacement."""
+    c = Kconfig("tests/Kbuild_functions")
+    # Double-quote the path -- works in both bash (Unix) and cmd.exe
+    # (Windows).  shlex.quote uses single quotes, which cmd.exe
+    # does not understand.
+    py = f'"{sys.executable}"'
+
+    assert _success_fn(c, "success", py + ' -c ""') == "y"
+    assert _success_fn(c, "success", py + ' -c "raise SystemExit(1)"') == "n"
+
+    assert _failure_fn(c, "failure", py + ' -c ""') == "n"
+    assert _failure_fn(c, "failure", py + ' -c "raise SystemExit(1)"') == "y"
+
+    assert _if_success_fn(c, "if-success", py + ' -c ""', "yes", "no") == "yes"
+    assert (
+        _if_success_fn(c, "if-success", py + ' -c "raise SystemExit(1)"', "yes", "no")
+        == "no"
+    )
+
+
+def test_python_fn_isolation(kbuild_kconfig):
+    """Verify that assignments in one $(python,...) call do not leak
+    into subsequent calls."""
+    python_fn = kbuild_kconfig._functions["python"][0]
+    c = kbuild_kconfig
+
+    assert python_fn(c, "python", "leaked_var = 42") == "y"
+    assert python_fn(c, "python", "assert 'leaked_var' not in dir()") == "y"
+
+
+def test_python_fn_system_exit(kbuild_kconfig):
+    """Verify SystemExit handling: exit(0) -> 'y', exit(1) -> 'n'."""
+    python_fn = kbuild_kconfig._functions["python"][0]
+    c = kbuild_kconfig
+
+    assert python_fn(c, "python", "raise SystemExit(0)") == "y"
+    assert python_fn(c, "python", "raise SystemExit(None)") == "y"
+    assert python_fn(c, "python", "raise SystemExit(1)") == "n"
+    assert python_fn(c, "python", "raise SystemExit('error')") == "n"
+
+    # Falsy codes -> "y", truthy codes -> "n"
+    assert python_fn(c, "python", 'raise SystemExit("")') == "y"
+    assert python_fn(c, "python", "raise SystemExit([])") == "y"
+    assert python_fn(c, "python", "raise SystemExit([1])") == "n"
+
+
+def test_python_fn_warnings(kbuild_kconfig):
+    """Verify that non-assertion exceptions generate warnings
+    while AssertionError is silent."""
+    c = kbuild_kconfig
+    python_fn = c._functions["python"][0]
+
+    # AssertionError: silent (expected for boolean checks)
+    c.warnings.clear()
+    assert python_fn(c, "python", "assert False") == "n"
+    assert len(c.warnings) == 0
+
+    # NameError: warns (typo in code string)
+    c.warnings.clear()
+    assert python_fn(c, "python", "nonexistent_var") == "n"
+    assert len(c.warnings) == 1
+    assert "NameError" in c.warnings[0]
+
+    # SyntaxError: warns (malformed code)
+    c.warnings.clear()
+    assert python_fn(c, "python", "def") == "n"
+    assert len(c.warnings) == 1
+    assert "SyntaxError" in c.warnings[0]
+
+    # Success: no warning
+    c.warnings.clear()
+    assert python_fn(c, "python", "x = 1") == "y"
+    assert len(c.warnings) == 0
 
 
 # ===========================================================================
