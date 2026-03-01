@@ -546,7 +546,9 @@ page.
 import errno
 import importlib
 import os
+import platform
 import re
+import shutil
 import sys
 
 # Get rid of some attribute lookups. These are obvious in context.
@@ -1058,6 +1060,7 @@ class Kconfig:
             "filename": (_filename_fn, 0, 0),
             "lineno": (_lineno_fn, 0, 0),
             "shell": (_shell_fn, 1, 1),
+            "python": (_python_fn, 0, 1),
             "warning-if": (_warning_if_fn, 2, 2),
             # Kbuild toolchain test functions
             "if-success": (_if_success_fn, 3, 3),
@@ -2827,9 +2830,51 @@ class Kconfig:
                 new_args.append(s[arg_start : match.start()])
                 arg_start = i
 
-            else:  # match.group() == "$("
+            elif match.group() == "$(":
                 # A nested macro call within the macro
                 s, i = self._expand_macro(s, match.start(), args)
+
+            else:
+                # A quote character (" or ').  Try to skip
+                # to the matching close delimiter, expanding
+                # macros along the way but ignoring commas
+                # and parentheses.  Handles single ("/'")
+                # and triple ("""/''') quotes.
+                #
+                # If no matching close quote exists, the
+                # character is treated as literal so that
+                # unbalanced quotes in $(shell,...) etc.
+                # do not break parsing (backward compat).
+                quote = match.group()
+                saved_i = match.end()
+                i = saved_i
+                if s[i : i + 2] == quote * 2:
+                    close = quote * 3
+                    i += 2
+                else:
+                    close = quote
+                clen = len(close)
+                while 1:
+                    qi = s.find(close, i)
+                    if qi < 0:
+                        # No matching close -- treat the
+                        # opening quote as literal text.
+                        i = saved_i
+                        break
+                    # Find backslash escape and nested
+                    # macro; process whichever comes first
+                    # so a \-escape after a $() does not
+                    # skip the macro expansion.
+                    bi = s.find("\\", i)
+                    mi = _macro_quote_search(s, i)
+                    if 0 <= bi < qi and (not mi or bi < mi.start()):
+                        i = bi + 2
+                        continue
+                    if mi and mi.start() < qi:
+                        s, i = self._expand_macro(s, mi.start(), args)
+                    else:
+                        i = qi + clen
+                        break
 
     def _fn_val(self, args):
         # Returns the result of calling the function args[0] with the arguments
@@ -7105,40 +7150,108 @@ def _shell_fn(kconf, _, command):
     return "\n".join(stdout.splitlines()).rstrip("\n").replace("\n", " ")
 
 
+def _run_helper(*argv):
+    # Shell-free command execution for use inside $(python,...) code strings.
+    # Returns True if command exits with code 0, False otherwise.
+    return _run_argv(list(argv))
+
+
+# Namespace exposed to $(python,...) code strings.
+# Provides scope isolation (no parser internals visible) and
+# pre-imported modules so code strings stay short.
+_PYTHON_GLOBALS = {
+    "os": os,
+    "sys": sys,
+    "shutil": shutil,
+    "platform": platform,
+    "run": _run_helper,
+}
+
+
+def _python_fn(kconf, _, code=""):
+    # Evaluates a Python code string in-process.
+    # Returns "y" on success, "n" otherwise.
+    #
+    # A fresh copy of _PYTHON_GLOBALS is passed to each
+    # exec() call so that assignments in one $(python,...)
+    # invocation do not leak into subsequent calls.
+    #
+    # AssertionError is silent (the expected mechanism for
+    # boolean checks).  Other exceptions emit a warning so
+    # that typos and bugs in code strings are visible.
+    try:
+        exec(  # noqa: S102  -- intentional; $(python,...) is trusted like $(shell,...)
+            compile(code, "<python>", "exec"),
+            _PYTHON_GLOBALS.copy(),
+        )
+        return "y"
+    except SystemExit as e:
+        return "n" if e.code else "y"
+    except AssertionError:
+        return "n"
+    except Exception as e:
+        kconf._warn(
+            f"$(python,...) raised {type(e).__name__}: {e}",
+            kconf.loc,
+        )
+        return "n"
+
+
+# Timeout for toolchain subprocess calls (seconds).
+# Prevents indefinite hangs from stuck compilers or
+# linkers.  Generous enough for cross-compilation on
+# slow systems; tight enough to catch real hangs.
+_SUBPROCESS_TIMEOUT = 30
+
+
 def _run_cmd(command):
-    # Runs 'command' in a shell and returns True if it exits with 0.
-    # Returns False on any error (non-zero exit or exception).
+    # Runs 'command' in a shell and returns True if it
+    # exits with 0.  Kills the process on timeout or
+    # any unexpected error.
     import subprocess
 
     try:
         proc = subprocess.Popen(
-            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            command,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-        proc.communicate()
+    except Exception:
+        return False
+
+    try:
+        proc.communicate(timeout=_SUBPROCESS_TIMEOUT)
         return proc.returncode == 0
     except Exception:
+        proc.kill()
+        proc.wait()
         return False
 
 
-def _run_cmd_in_tmpdir(cmd_fmt):
-    # Creates a temporary directory, formats 'cmd_fmt' with it, runs the
-    # command, and cleans up. Returns True if the command exits with 0.
-    import tempfile
+def _run_argv(argv, stdin_data=None):
+    # Runs a command given as an argument list (no shell
+    # involvement).  Returns True if exit code is 0.
+    # Kills the process on timeout or unexpected error.
+    import subprocess
 
-    tmpdir = None
     try:
-        tmpdir = tempfile.mkdtemp()
-        return _run_cmd(cmd_fmt.replace("{tmpdir}", tmpdir))
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except Exception:
         return False
-    finally:
-        if tmpdir:
-            try:
-                import shutil
 
-                shutil.rmtree(tmpdir)
-            except Exception:
-                pass
+    try:
+        proc.communicate(input=stdin_data, timeout=_SUBPROCESS_TIMEOUT)
+        return proc.returncode == 0
+    except Exception:
+        proc.kill()
+        proc.wait()
+        return False
 
 
 def _success_fn(kconf, _, command):
@@ -7146,46 +7259,61 @@ def _success_fn(kconf, _, command):
 
 
 def _cc_option_fn(kconf, _, option, fallback=""):
+    import tempfile
+
     cc = os.environ.get("CC", "gcc")
-    return (
-        "y"
-        if _run_cmd_in_tmpdir(
-            cc
-            + " -Werror "
-            + option
-            + " -c -x c /dev/null -o {tmpdir}/tmp.o 2>/dev/null"
-        )
-        else "n"
-    )
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpfile = os.path.join(tmpdir, "tmp.o")
+            argv = (
+                cc.split()
+                + ["-Werror"]
+                + option.split()
+                + ["-c", "-x", "c", os.devnull, "-o", tmpfile]
+            )
+            return "y" if _run_argv(argv) else "n"
+    except Exception:
+        return "n"
 
 
 def _ld_option_fn(kconf, _, option):
     ld = os.environ.get("LD", "ld")
-    return "y" if _run_cmd(f"{ld} -v {option} 2>/dev/null") else "n"
+    argv = ld.split() + ["-v"] + option.split()
+    return "y" if _run_argv(argv) else "n"
 
 
 def _as_instr_fn(kconf, _, instr, extra_flags=""):
     cc = os.environ.get("CC", "gcc")
-    cmd = (
-        'printf "%b\\n" "{}" | '
-        "{} {} -Wa,--fatal-warnings -c -x assembler-with-cpp"
-        " -o /dev/null - 2>/dev/null"
-    ).format(instr.replace('"', '\\"'), cc, extra_flags)
-    return "y" if _run_cmd(cmd) else "n"
+    argv = cc.split()
+    if extra_flags:
+        argv += extra_flags.split()
+    argv += [
+        "-Wa,--fatal-warnings",
+        "-c",
+        "-x",
+        "assembler-with-cpp",
+        "-o",
+        os.devnull,
+        "-",
+    ]
+    return "y" if _run_argv(argv, (instr + "\n").encode()) else "n"
 
 
 def _as_option_fn(kconf, _, option, fallback=""):
+    import tempfile
+
     cc = os.environ.get("CC", "gcc")
-    return (
-        "y"
-        if _run_cmd_in_tmpdir(
-            cc
-            + " "
-            + option
-            + " -c -x assembler /dev/null -o {tmpdir}/tmp.o 2>/dev/null"
-        )
-        else "n"
-    )
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpfile = os.path.join(tmpdir, "tmp.o")
+            argv = (
+                cc.split()
+                + option.split()
+                + ["-c", "-x", "assembler", os.devnull, "-o", tmpfile]
+            )
+            return "y" if _run_argv(argv) else "n"
+    except Exception:
+        return "n"
 
 
 def _if_success_fn(kconf, _, command, then_val, else_val):
@@ -7198,39 +7326,39 @@ def _failure_fn(kconf, _, command):
 
 def _cc_option_bit_fn(kconf, _, option):
     cc = os.environ.get("CC", "gcc")
-    return (
-        option
-        if _run_cmd(f"{cc} -Werror {option} -E -x c /dev/null -o /dev/null 2>/dev/null")
-        else ""
+    argv = (
+        cc.split()
+        + ["-Werror"]
+        + option.split()
+        + ["-E", "-x", "c", os.devnull, "-o", os.devnull]
     )
+    return option if _run_argv(argv) else ""
 
 
 def _rustc_option_fn(kconf, _, option):
     import tempfile
 
     rustc = os.environ.get("RUSTC", "rustc")
-
-    tmpdir = None
     try:
-        tmpdir = tempfile.mkdtemp()
-        # Create a dummy Rust file
-        dummy_rs = os.path.join(tmpdir, "lib.rs")
-        with open(dummy_rs, "w") as f:
-            f.write("")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dummy_rs = os.path.join(tmpdir, "lib.rs")
+            with open(dummy_rs, "w") as f:
+                f.write("")
 
-        cmd = f"{rustc} {option} --crate-type=rlib {dummy_rs} --out-dir={tmpdir} -o {tmpdir}/tmp.rlib 2>/dev/null"
-
-        return "y" if _run_cmd(cmd) else "n"
+            argv = (
+                rustc.split()
+                + option.split()
+                + [
+                    "--crate-type=rlib",
+                    dummy_rs,
+                    "--out-dir=" + tmpdir,
+                    "-o",
+                    os.path.join(tmpdir, "tmp.rlib"),
+                ]
+            )
+            return "y" if _run_argv(argv) else "n"
     except Exception:
         return "n"
-    finally:
-        if tmpdir:
-            try:
-                import shutil
-
-                shutil.rmtree(tmpdir)
-            except Exception:
-                pass
 
 
 #
@@ -7604,8 +7732,14 @@ _assignment_lhs_fragment_match = _re_match("[A-Za-z0-9_-]*")
 # variable assignment
 _assignment_rhs_match = _re_match(r"\s*(=|:=|\+=)\s*(.*)")
 
-# Special characters/strings while expanding a macro ('(', ')', ',', and '$(')
-_macro_special_search = _re_search(r"\(|\)|,|\$\(")
+# Special characters/strings while expanding a macro ('(', ')', ',', '$(', and
+# quotes).  Quotes are tracked so that commas and parentheses inside quoted
+# regions (e.g. $(python,assert "a,b" == "a,b")) are not treated as argument
+# separators or nesting changes.
+_macro_special_search = _re_search(r"\(|\)|,|\$\(|\"|'")
+
+# Nested macro start ('$(') inside a quoted region
+_macro_quote_search = _re_search(r"\$\(")
 
 # Special characters/strings while expanding a string (quotes, '\', and '$(')
 _string_special_search = _re_search(r'"|\'|\\|\$\(')
