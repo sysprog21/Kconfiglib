@@ -515,7 +515,9 @@ def menuconfig(kconf, headless=False):
 
     # Enter terminal mode via rawterm. _menuconfig() returns a string to print
     # on exit.
-    print(rawterm.run(_menuconfig))
+    result = rawterm.run(_menuconfig)
+    if result is not None:
+        print(result)
 
 
 def _load_config():

@@ -636,10 +636,24 @@ class Terminal:
         self._old_in_mode = wintypes.DWORD()
         kernel32.GetConsoleMode(self._stdin_handle, ctypes.byref(self._old_in_mode))
 
-        # Enable VT100 output
+        # Enable VT100 output.  DISABLE_NEWLINE_AUTO_RETURN (0x0008)
+        # prevents the console from inserting a CR before every LF,
+        # which causes cursor-positioning drift in TUI apps.  Microsoft
+        # recommends setting both flags together for VT100 applications.
+        #
+        # Graceful fallback: if the combination is rejected (pre-1607
+        # builds), retry with VT100 alone.
         ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-        new_out = self._old_out_mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-        kernel32.SetConsoleMode(self._stdout_handle, new_out)
+        DISABLE_NEWLINE_AUTO_RETURN = 0x0008
+        new_out = (
+            self._old_out_mode.value
+            | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            | DISABLE_NEWLINE_AUTO_RETURN
+        )
+        if not kernel32.SetConsoleMode(self._stdout_handle, new_out):
+            # Pre-1607: DISABLE_NEWLINE_AUTO_RETURN unsupported, VT100 only
+            new_out = self._old_out_mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            kernel32.SetConsoleMode(self._stdout_handle, new_out)
 
         # Try VT100 input
         ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200
@@ -777,20 +791,47 @@ class Terminal:
             pass
 
     def _flush(self):
-        """Flush stdout."""
+        """Flush stdout.
+
+        Terminal fds are always blocking, so the non-blocking dance is
+        purely defensive.  Each step (get_blocking, set_blocking, flush,
+        restore) is isolated so that a failure in the probe never
+        prevents the flush from running.
+
+        os.get_blocking raises AttributeError when unavailable (Windows
+        Python <3.12) and OSError on Windows console handles even when
+        present, so we catch both and default to was_blocking=True
+        (skip the set_blocking detour).
+        """
+        was_blocking = True
+        fd = None
         try:
-            # Ensure blocking I/O for flush
             fd = sys.stdout.fileno()
-            was_blocking = os.get_blocking(fd)
-            if not was_blocking:
-                os.set_blocking(fd, True)
-            try:
-                sys.stdout.buffer.flush()
-            finally:
-                if not was_blocking:
-                    os.set_blocking(fd, False)
         except OSError:
             pass
+
+        if fd is not None:
+            try:
+                was_blocking = os.get_blocking(fd)
+            except (AttributeError, OSError):
+                was_blocking = True
+
+            if not was_blocking:
+                try:
+                    os.set_blocking(fd, True)
+                except OSError:
+                    pass
+
+        try:
+            sys.stdout.buffer.flush()
+        except OSError:
+            pass
+        finally:
+            if fd is not None and not was_blocking:
+                try:
+                    os.set_blocking(fd, False)
+                except OSError:
+                    pass
 
     def update(self):
         """Composite all regions and flush to terminal.

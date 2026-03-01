@@ -18,6 +18,30 @@ sys.path.insert(0, os.getcwd())
 _IS_WINDOWS = os.name == "nt"
 
 
+def check_version():
+    """Minimal Python version checks and platform capability report."""
+    ver = sys.version_info
+    assert ver >= (3, 6), "Python >= 3.6 required, got {}.{}".format(ver[0], ver[1])
+    print("Python {}.{}.{} on {}".format(ver[0], ver[1], ver[2], sys.platform))
+
+    if _IS_WINDOWS:
+        has_get_blocking = hasattr(os, "get_blocking")
+        print(
+            "  os.get_blocking: {}".format(
+                "available" if has_get_blocking else "unavailable (Python <3.12)"
+            )
+        )
+        if has_get_blocking:
+            # Probe whether it actually works on console handles
+            try:
+                os.get_blocking(sys.stdout.fileno())
+                print("  os.get_blocking(stdout): works")
+            except OSError:
+                print("  os.get_blocking(stdout): OSError (console handle)")
+
+    print("version checks passed")
+
+
 def check_rawterm_units():
     """rawterm Color, Style, Key, Box -- no terminal required."""
     from rawterm import Style, Color, Key, Box, NAMED_COLORS
@@ -165,6 +189,21 @@ def check_windows_console():
         stdout_h, out_mode.value
     ), "SetConsoleMode(stdout, restore) failed"
 
+    # Test VT100 + DISABLE_NEWLINE_AUTO_RETURN combination
+    DISABLE_NEWLINE_AUTO_RETURN = 0x0008
+    new_out_both = (
+        out_mode.value
+        | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        | DISABLE_NEWLINE_AUTO_RETURN
+    )
+    dnar_ok = kernel32.SetConsoleMode(stdout_h, new_out_both)
+    kernel32.SetConsoleMode(stdout_h, out_mode.value)  # always restore
+    print(
+        "  DISABLE_NEWLINE_AUTO_RETURN: {}".format(
+            "supported" if dnar_ok else "not supported (pre-1607)"
+        )
+    )
+
     # Test VT100 input mode (may fail on older Windows -- not fatal)
     ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200
     new_in = (in_mode.value | ENABLE_VIRTUAL_TERMINAL_INPUT) & ~0x0007
@@ -265,8 +304,61 @@ def check_menuconfig_headless():
     print("menuconfig headless + style validation passed")
 
 
+def check_flush_robustness():
+    """Verify _flush() survives missing or broken os.get_blocking.
+
+    Exercises the (AttributeError, OSError) handling added to fix
+    issue #48: on Python <3.11, os.get_blocking does not exist; on
+    Windows 3.11 console handles, it raises OSError.  In both cases
+    the flush must still run.
+    """
+    import io
+    from unittest import mock
+    from rawterm import Terminal
+
+    # Construct a Terminal without entering raw mode -- we only need
+    # _flush() and _write_raw(), which operate on sys.stdout.buffer.
+    term = object.__new__(Terminal)
+
+    # Redirect stdout.buffer to a BytesIO so we can verify output
+    buf = io.BytesIO()
+    fake_stdout = mock.MagicMock()
+    fake_stdout.buffer = buf
+    fake_stdout.fileno.return_value = 1
+
+    with mock.patch("sys.stdout", fake_stdout):
+        # Case 1: os.get_blocking raises AttributeError (Python <3.11)
+        # create=True: os.get_blocking may not exist on Windows Python <3.12
+        with mock.patch("os.get_blocking", side_effect=AttributeError, create=True):
+            term._write_raw("hello")
+            term._flush()
+        assert buf.getvalue() == b"hello", "flush after AttributeError"
+
+        buf.seek(0)
+        buf.truncate()
+
+        # Case 2: os.get_blocking raises OSError (Windows console handle)
+        with mock.patch("os.get_blocking", side_effect=OSError, create=True):
+            term._write_raw(" world")
+            term._flush()
+        assert buf.getvalue() == b" world", "flush after OSError"
+
+        buf.seek(0)
+        buf.truncate()
+
+        # Case 3: os.get_blocking works normally (returns True)
+        with mock.patch("os.get_blocking", return_value=True, create=True):
+            term._write_raw("ok")
+            term._flush()
+        assert buf.getvalue() == b"ok", "flush with normal get_blocking"
+
+    print("_flush() robustness checks passed")
+
+
 if __name__ == "__main__":
+    check_version()
     check_rawterm_units()
+    check_flush_robustness()
     check_windows_console()
     check_terminal_init()
     check_menuconfig_headless()
