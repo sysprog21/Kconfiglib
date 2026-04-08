@@ -6,10 +6,18 @@ concurrency:
   group: style-check-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+
 jobs:
   format-check:
     name: Check Code Format
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
     - name: Check out Kconfiglib source code
@@ -22,14 +30,30 @@ jobs:
 
     - name: Install tools
       run: |
-           sudo apt-get install -q=2 shfmt python3-pip
-           pip3 install black==26.1.0 ruff==0.15.2
+        set -euo pipefail
+        sudo apt-get install -q=2 shfmt python3-pip
+        pip3 install black==26.1.0 ruff==0.15.2
 
     - name: Run format check
       run: |
-           .ci/check-newline.sh
-           .ci/check-format.sh
-      shell: bash
+        set -euo pipefail
+        .ci/check-newline.sh
+        .ci/check-format.sh
 
     - name: Run Ruff linter
-      run: ruff check .
+      run: |
+        set -euo pipefail
+        ruff check --output-format=full .
+
+    - name: Diagnostic dump on failure
+      if: failure()
+      run: |
+        set +e
+        echo "::group::Tool versions"
+        shfmt --version
+        black --version
+        ruff --version
+        echo "::endgroup::"
+        echo "::group::Black diff"
+        black --diff --color .
+        echo "::endgroup::"
