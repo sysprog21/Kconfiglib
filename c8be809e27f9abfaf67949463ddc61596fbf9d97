@@ -1,0 +1,68 @@
+.github/workflows/style.yml
+  00c167eaa08bfe1a 9-12,18-21,33-35,39-41,44-59
+.github/workflows/package.yml
+  00c167eaa08bfe1a 16-19,25-28,37-38,46,51,54,56-57,64-76
+.github/workflows/release.yml
+  00c167eaa08bfe1a 22-25,34-38,44,48-67
+.github/workflows/test.yml
+  00c167eaa08bfe1a 3-6,12-20,22-26,36,57-58,61-101,103-135,139-140,152,154-156,167,171,176,183,186-187,189-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "c8be809e27f9abfaf67949463ddc61596fbf9d97",
+  "prompts": {
+    "00c167eaa08bfe1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8fcacf11-e4dc-48d5-b22d-1548b000db75",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 442,
+      "total_deletions": 264,
+      "accepted_lines": 268,
+      "overriden_lines": 0
+    },
+    "1c1ab24113deab05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b8e9327-0555-43b3-84b3-e1a650f1b35c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 105,
+      "total_deletions": 56,
+      "accepted_lines": 45,
+      "overriden_lines": 0
+    },
+    "3dd7139d8854cddb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d69b2-4acd-7713-b401-0818089a604f",
+        "model": "gpt-5.1-codex"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 1228,
+      "total_deletions": 0,
+      "accepted_lines": 1146,
+      "overriden_lines": 0
+    },
+    "8dd6f7d913a31b87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7892190-50c3-47e4-a62b-1845b1626ec5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 132,
+      "total_deletions": 93,
+      "accepted_lines": 116,
+      "overriden_lines": 0
+    }
+  }
+}
