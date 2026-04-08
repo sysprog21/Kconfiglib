@@ -19,6 +19,10 @@ jobs:
     needs: [ test, package ]
     runs-on: ubuntu-24.04
 
+    defaults:
+      run:
+        shell: bash
+
     permissions:
       contents: write
       id-token: write
@@ -27,11 +31,37 @@ jobs:
     - name: Download build artifacts
       uses: actions/download-artifact@v7
 
+    - name: List downloaded artifacts
+      run: |
+        set -euo pipefail
+        ls -la dist/
+
     - name: Upload release assets
       uses: softprops/action-gh-release@v2
       with:
         files: |
           dist/*.whl
+          dist/*.tar.gz
 
     - name: Publish package to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
+
+    - name: Diagnostic dump on failure
+      if: failure()
+      # Release tag/name are user-controlled input, so never interpolate them
+      # directly into the shell body. Pass through env: and expand with
+      # shell-safe quoting inside the script.
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+        RELEASE_DRAFT: ${{ github.event.release.draft }}
+        RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+      run: |
+        set +e
+        echo "::group::dist/ contents"
+        ls -la dist/ 2>/dev/null
+        echo "::endgroup::"
+        echo "::group::Release context"
+        printf 'tag:        %s\n' "$RELEASE_TAG"
+        printf 'draft:      %s\n' "$RELEASE_DRAFT"
+        printf 'prerelease: %s\n' "$RELEASE_PRERELEASE"
+        echo "::endgroup::"

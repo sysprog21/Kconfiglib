@@ -13,10 +13,18 @@ concurrency:
   group: package-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+
 jobs:
   package:
     name: Package
     runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
     - name: Set up Python
@@ -24,15 +32,10 @@ jobs:
       with:
         python-version: '3.12'
 
-    - name: Check Python version
-      run: |
-        set -x
-        python --version
-        pip --version
-        python -c "import platform; print(platform.architecture())"
-
     - name: Install Python dependencies
       run: |
+        set -euo pipefail
+        python -m pip install --user --upgrade pip
         pip install --user setuptools wheel
 
     - name: Check out Kconfiglib source code
@@ -40,14 +43,34 @@ jobs:
 
     - name: Build source distribution
       run: |
+        set -euo pipefail
         python setup.py sdist
 
     - name: Build built distribution wheel
       run: |
+        set -euo pipefail
         python setup.py bdist_wheel
+
+    - name: List built artifacts
+      run: |
+        set -euo pipefail
+        ls -la dist/
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v6
       with:
         name: dist
         path: dist/*
+
+    - name: Diagnostic dump on failure
+      if: failure()
+      run: |
+        set +e
+        echo "::group::dist/ and build/ contents"
+        ls -la dist/ 2>/dev/null
+        ls -laR build/ 2>/dev/null | head -200
+        echo "::endgroup::"
+        echo "::group::Python environment"
+        python --version
+        python -m pip list
+        echo "::endgroup::"

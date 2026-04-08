@@ -1,14 +1,29 @@
 name: Test
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_call:
 
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
 
+# Verbose pytest defaults: long tracebacks, locals, and a short test summary
+# (-ra) so failed/skipped/xfailed tests are listed at the end of the log
+# instead of buried in the middle. Applied via env so every pytest invocation
+# in this workflow inherits the same diagnostics.
+env:
+  PYTEST_ADDOPTS: "-vv --tb=long --showlocals -ra --color=yes"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+
 jobs:
-  test:
-    name: Test (Python ${{ matrix.target.python }}, ${{ matrix.target.os }})
+  # Fast pytest selftests + rawterm/menuconfig smoke test on all platforms.
+  # Independent of the kernel tree, so it returns feedback quickly and runs
+  # in parallel with the slower conformance job below.
+  selftest:
+    name: Selftest (Python ${{ matrix.target.python }}, ${{ matrix.target.os }})
     runs-on: ${{ matrix.target.builder }}
 
     defaults:
@@ -18,9 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # NOTE: Windows runs only headless tests (no kernel tree, no Unix
-        #       shell). Linux/macOS run selftests, conformance tests, and
-        #       example scripts.
+        # NOTE: Windows runs only the headless-portable subset (no Unix shell).
         target:
         - python: '3.12'
           os: Linux
@@ -34,28 +47,97 @@ jobs:
           headless-only: true
 
     steps:
-    - name: Set up environment
-      run: |
-        if [ "${{ runner.os }}" == "Windows" ]; then
-          # Disable file name validation on Windows because Linux source tree
-          # contains potentially problematic file names.
-          git config --global core.protectNTFS false
-        fi
-
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.target.python }}
 
-    - name: Check Python version
+    - name: Install Python dependencies
       run: |
-        set -x
+        set -euo pipefail
+        python -m pip install --user --upgrade pip
+        python -m pip install --user setuptools wheel pytest
+
+    - name: Check out Kconfiglib source code
+      uses: actions/checkout@v6
+
+    - name: Run pytest selftests
+      run: |
+        set -euo pipefail
+        if [ "${{ matrix.target.headless-only }}" == "true" ]; then
+          # Windows: portable subset -- excludes tests that need gcc or
+          # Unix shell commands (Kpreprocess uses $(shell,...) with
+          # bash-specific syntax).
+          python -m pytest tests/test_preprocess.py \
+            -k "test_user_defined or test_success_failure or test_python_fn or test_kconfig_warn"
+        else
+          python -m pytest tests/ --ignore=tests/test_conformance.py
+        fi
+
+    - name: Validate rawterm and menuconfig (Unix)
+      # Exercises rawterm Color/Style/Region compositing, terminal init/close
+      # (termios on Unix), and menuconfig headless mode with style parsing.
+      if: ${{ matrix.target.os != 'Windows' }}
+      run: |
+        set -euo pipefail
+        python .ci/validate-rawterm.py
+
+    - name: Validate rawterm and menuconfig (Windows)
+      # On Windows, use cmd so Python gets real console handles (bash
+      # runs through MSYS2/mintty which lacks a native Windows console).
+      if: ${{ matrix.target.os == 'Windows' }}
+      shell: cmd
+      run: |
+        python .ci/validate-rawterm.py
+        if errorlevel 1 exit /b %errorlevel%
+
+    - name: Diagnostic dump on failure
+      if: failure()
+      shell: bash
+      run: |
+        # Best-effort diagnostics. Never let this step itself fail the job;
+        # the real failure has already been recorded above.
+        set +e
+        echo "::group::Python environment"
         python --version
-        pip --version
-        python -c "import platform; print(platform.architecture())"
+        python -c "import sys, platform; print('exec:', sys.executable); print('arch:', platform.architecture())"
+        python -m pip list
+        echo "::endgroup::"
+        echo "::group::Relevant environment variables"
+        env | grep -E '^(PYTHON|PIP|PYTEST|KCONFIG_)' | sort
+        echo "::endgroup::"
+
+  # Slow kernel-conformance tests: checkout Linux v6.18, build the C kconfig
+  # tools, then diff our output against them. Runs in parallel with selftest.
+  conformance:
+    name: Conformance (Python ${{ matrix.target.python }}, ${{ matrix.target.os }})
+    runs-on: ${{ matrix.target.builder }}
+
+    defaults:
+      run:
+        shell: bash
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+        - python: '3.12'
+          os: Linux
+          builder: ubuntu-24.04
+        - python: '3.12'
+          os: macOS
+          builder: macos-15
+
+    steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.target.python }}
 
     - name: Install Python dependencies
       run: |
+        set -euo pipefail
+        python -m pip install --user --upgrade pip
         python -m pip install --user setuptools wheel pytest
 
     - name: Install GNU toolchain (macOS)
@@ -67,14 +149,13 @@ jobs:
       # Makefile's unconditional LD=$(CROSS_COMPILE)ld assignment.
       if: ${{ matrix.target.os == 'macOS' }}
       run: |
+        set -euo pipefail
         brew install make lld
-        echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
-        echo "$(brew --prefix lld)/bin" >> $GITHUB_PATH
-        echo "LD=ld.lld" >> $GITHUB_ENV
+        echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+        echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+        echo "LD=ld.lld" >> "$GITHUB_ENV"
 
     - name: Check out Linux source code
-      # Skip for Windows (headless-only mode)
-      if: ${{ matrix.target.headless-only != true }}
       uses: actions/checkout@v6
       with:
         repository: torvalds/linux
@@ -83,54 +164,41 @@ jobs:
     - name: Check out Kconfiglib source code
       uses: actions/checkout@v6
       with:
-        # Windows (headless-only): checkout to root directory
-        # Linux/macOS (full test): checkout to Kconfiglib subdirectory
-        path: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
-
-    - name: Run pytest selftests
-      working-directory: ${{ matrix.target.headless-only && '.' || 'Kconfiglib' }}
-      run: |
-        if [ "${{ matrix.target.headless-only }}" == "true" ]; then
-          # Windows: portable subset -- excludes tests that need gcc or
-          # Unix shell commands (Kpreprocess uses $(shell,...) with
-          # bash-specific syntax).
-          python -m pytest tests/test_preprocess.py -v --tb=short \
-            -k "test_user_defined or test_success_failure or test_python_fn or test_kconfig_warn"
-        else
-          python -m pytest tests/ -v --tb=short --ignore=tests/test_conformance.py
-        fi
+        path: Kconfiglib
 
     - name: Apply Linux Kconfig Makefile patch
-      # Skip for Windows (headless-only mode)
-      if: ${{ matrix.target.headless-only != true }}
       run: |
+        set -euo pipefail
         git apply Kconfiglib/makefile.patch
 
     - name: Build kernel C kconfig tools
-      if: ${{ matrix.target.headless-only != true }}
       run: |
+        set -euo pipefail
         ${MAKE:-make} -j"$(getconf _NPROCESSORS_ONLN)" ARCH=x86 ${LD:+LD=$LD} allnoconfig
         test -x scripts/kconfig/conf
         rm -f .config .config.old
 
     - name: Run conformance tests and example scripts
-      # Skip for Windows (headless-only mode)
-      if: ${{ matrix.target.headless-only != true }}
       run: |
+        set -euo pipefail
         Kconfiglib/tests/reltest python
 
-    - name: Validate rawterm and menuconfig (Unix)
-      # Exercises rawterm Color/Style/Region compositing, terminal init/close
-      # (termios on Unix), and menuconfig headless mode with style parsing.
-      if: ${{ matrix.target.os != 'Windows' }}
-      working-directory: Kconfiglib
+    - name: Diagnostic dump on failure
+      if: failure()
       run: |
-        python .ci/validate-rawterm.py
-
-    - name: Validate rawterm and menuconfig (Windows)
-      # On Windows, use cmd so Python gets real console handles (bash
-      # runs through MSYS2/mintty which lacks a native Windows console).
-      if: ${{ matrix.target.os == 'Windows' }}
-      shell: cmd
-      run: |
-        python .ci/validate-rawterm.py
+        set +e
+        echo "::group::Kernel kconfig build artifacts"
+        ls -la scripts/kconfig/ 2>/dev/null
+        echo "::endgroup::"
+        echo "::group::Leftover .config (if any)"
+        cat .config 2>/dev/null | head -200
+        echo "::endgroup::"
+        echo "::group::Toolchain versions"
+        ${MAKE:-make} --version 2>/dev/null
+        ${LD:-ld} --version 2>/dev/null
+        cc --version 2>/dev/null
+        python --version
+        echo "::endgroup::"
+        echo "::group::Relevant environment variables"
+        env | grep -E '^(PYTHON|PIP|PYTEST|CC|HOSTCC|HOSTCXX|MAKE|LD|ARCH|SRCARCH|srctree|KERNELVERSION|KCONFIG_)' | sort
+        echo "::endgroup::"
