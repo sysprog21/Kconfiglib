@@ -19,7 +19,7 @@ Platform support:
   - Windows 10 build 1511+: VT100 output via SetConsoleMode,
     three input paths (VT100, ReadConsoleInputW, MSYS2/mintty PTY)
 
-Minimum: Python 3.6+, any VT100-capable terminal.
+Minimum: Python 3.8+, any VT100-capable terminal.
 """
 
 import atexit

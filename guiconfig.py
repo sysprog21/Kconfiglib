@@ -9,7 +9,7 @@ Overview
 
 A Tkinter-based menuconfig implementation, based around a treeview control and
 a help display. The interface should feel familiar to people used to qconf
-('make xconfig'). Requires Python 3.6+.
+('make xconfig'). Requires Python 3.8+.
 
 The display can be toggled between showing the full tree and showing just a
 single menu (like menuconfig.py). Only single-menu mode distinguishes between
@@ -2419,11 +2419,7 @@ def _update_jump_to_matches(msglabel, search_string):
             for token in search_string.lower().split()
         ]
     except re.error as e:
-        msg = "Bad regular expression"
-        # re.error.msg was added in Python 3.5
-        if hasattr(e, "msg"):
-            msg += ": " + e.msg
-        msglabel["text"] = msg
+        msglabel["text"] = "Bad regular expression: " + e.msg
         # Clear tree
         _jump_to_tree.set_children("")
         return

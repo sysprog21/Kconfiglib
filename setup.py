@@ -55,7 +55,7 @@ setuptools.setup(
     },
     # No C extensions or third-party dependencies required.
     # menuconfig uses pure-Python terminal I/O instead of curses.
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     project_urls={
         "GitHub repository": "https://github.com/sysprog21/Kconfiglib",
         "Examples": "https://github.com/sysprog21/Kconfiglib/tree/main/examples",
@@ -69,13 +69,12 @@ setuptools.setup(
         "Operating System :: POSIX",
         "Operating System :: Microsoft :: Windows",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],

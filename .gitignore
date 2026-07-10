@@ -2,3 +2,5 @@
 build/
 *.egg-info/
 dist/
+mconf/.git/
+mconf/build/

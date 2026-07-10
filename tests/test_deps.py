@@ -7,7 +7,15 @@
 
 import pytest
 
-from kconfiglib import Kconfig, KconfigError, expr_str
+from kconfiglib import (
+    Default,
+    Imply,
+    Kconfig,
+    KconfigError,
+    Range,
+    Select,
+    expr_str,
+)
 
 # -- Symbol/Choice.direct_dep ------------------------------------------------
 
@@ -116,6 +124,12 @@ def test_multidef_property_copying():
     verify_props("range", c.syms["MULTIDEF_RANGE"].ranges, "A B C D E F")
 
     verify_props("default", c.choices[1].defaults, "A B C D E")
+
+    assert all(isinstance(prop, Default) for prop in c.syms["MULTIDEF"].defaults)
+    assert all(isinstance(prop, Select) for prop in c.syms["MULTIDEF"].selects)
+    assert all(isinstance(prop, Imply) for prop in c.syms["MULTIDEF"].implies)
+    assert all(isinstance(prop, Range) for prop in c.syms["MULTIDEF_RANGE"].ranges)
+    assert all(isinstance(prop, Default) for prop in c.choices[1].defaults)
 
 
 # -- Dependency loop detection ------------------------------------------------
