@@ -68,7 +68,7 @@ such as unused symbols, symbols that can never be enabled, pointless menuconfig 
 prefixes in source code. Run it directly with `python3 lint.py <Kconfig>` or see `python3 lint.py --help`
 for available checks.
 
-Kconfiglib requires Python 3.6 or later.
+Kconfiglib requires Python 3.8 or later.
 
 **Note:** If Kconfiglib is installed with the `pip --user` flag,
 ensure that the `PATH` variable includes the directory where the executables are installed.
@@ -95,7 +95,7 @@ See the module docstring at the top of [kconfiglib.py](kconfiglib.py).
 
 ### Python version compatibility
 
-Kconfiglib requires Python 3.6 or later.
+Kconfiglib requires Python 3.8 or later.
 The code primarily relies on basic Python features and does not depend on third-party libraries.
 
 ## Getting started
@@ -351,7 +351,7 @@ Three configuration interfaces are currently available:
 
   There is also a show-help mode that displays the help text of the currently selected symbol in the bottom help window.
 
-  `menuconfig.py` requires Python 3.6+. No third-party dependencies or C extensions are needed on any platform.
+  `menuconfig.py` requires Python 3.8+. No third-party dependencies or C extensions are needed on any platform.
 
   See the docstring at the top of [menuconfig.py](menuconfig.py) for more information about the terminal menuconfig implementation.
 
@@ -367,7 +367,7 @@ Three configuration interfaces are currently available:
   Toggle between themes via the Theme menu.
   The interface includes a responsive layout that adapts to window resizing.
 
-  `guiconfig.py` has been tested on X11, Windows, and macOS, and requires Python 3.6+.
+  `guiconfig.py` has been tested on X11, Windows, and macOS, and requires Python 3.8+.
 
   Although Tkinter is part of the Python standard library, it is not always installed by default on Linux.
   The commands below install it on a few different systems:

@@ -52,8 +52,8 @@ sections.
 make kmenuconfig
 ----------------
 
-This target runs the terminal menuconfig interface with Python 3. As of
-Kconfiglib 12.2.0, Python 3 (3.6+) is required.
+This target runs the terminal menuconfig interface with Python 3. Python 3
+(3.8+) is required.
 
 
 make guiconfig
@@ -552,10 +552,21 @@ import shutil
 import sys
 
 # Get rid of some attribute lookups. These are obvious in context.
+from collections import namedtuple
 from glob import iglob
 from os.path import dirname, exists, expandvars, islink, join, realpath
 
 VERSION = (14, 1, 0)
+
+# Record types for the location-bearing Symbol/Choice properties. These are
+# tuple subclasses, so existing positional unpacking and indexing keep working
+# unchanged; the named fields just add a safer access idiom (r.low, d.cond)
+# than remembering positions. The trailing 'loc' element is what distinguishes
+# these from the 2-/3-tuple orig_* variants, which stay plain tuples.
+Range = namedtuple("Range", ("low", "high", "cond", "loc"))
+Default = namedtuple("Default", ("value", "cond", "loc"))
+Select = namedtuple("Select", ("symbol", "cond", "loc"))
+Imply = namedtuple("Imply", ("symbol", "cond", "loc"))
 
 
 # File layout:
@@ -3273,7 +3284,7 @@ class Kconfig:
                     self._parse_error("only symbols can select")
 
                 node.selects.append(
-                    (self._expect_nonconst_sym(), self._parse_cond(), self.loc)
+                    Select(self._expect_nonconst_sym(), self._parse_cond(), self.loc)
                 )
 
             elif t0 is None:
@@ -3282,13 +3293,13 @@ class Kconfig:
 
             elif t0 is _T_DEFAULT:
                 node.defaults.append(
-                    (self._parse_expr(False), self._parse_cond(), self.loc)
+                    Default(self._parse_expr(False), self._parse_cond(), self.loc)
                 )
 
             elif t0 in _DEF_TOKEN_TO_TYPE:
                 self._set_type(node.item, _DEF_TOKEN_TO_TYPE[t0])
                 node.defaults.append(
-                    (self._parse_expr(False), self._parse_cond(), self.loc)
+                    Default(self._parse_expr(False), self._parse_cond(), self.loc)
                 )
 
             elif t0 is _T_PROMPT:
@@ -3296,7 +3307,7 @@ class Kconfig:
 
             elif t0 is _T_RANGE:
                 node.ranges.append(
-                    (
+                    Range(
                         self._expect_sym(),
                         self._expect_sym(),
                         self._parse_cond(),
@@ -3309,7 +3320,7 @@ class Kconfig:
                     self._parse_error("only symbols can imply")
 
                 node.implies.append(
-                    (self._expect_nonconst_sym(), self._parse_cond(), self.loc)
+                    Imply(self._expect_nonconst_sym(), self._parse_cond(), self.loc)
                 )
 
             elif t0 is _T_VISIBLE:
@@ -3330,7 +3341,7 @@ class Kconfig:
 
                     if env_var in os.environ:
                         node.defaults.append(
-                            (
+                            Default(
                                 self._lookup_const_sym(os.environ[env_var]),
                                 self.y,
                                 f"env[{env_var}]",
@@ -3832,28 +3843,28 @@ class Kconfig:
                     # Propagate dependencies to defaults
                     if cur.defaults:
                         cur.defaults = [
-                            (default, self._make_and(cond, dep), loc)
+                            Default(default, self._make_and(cond, dep), loc)
                             for default, cond, loc in cur.defaults
                         ]
 
                     # Propagate dependencies to ranges
                     if cur.ranges:
                         cur.ranges = [
-                            (low, high, self._make_and(cond, dep), loc)
+                            Range(low, high, self._make_and(cond, dep), loc)
                             for low, high, cond, loc in cur.ranges
                         ]
 
                     # Propagate dependencies to selects
                     if cur.selects:
                         cur.selects = [
-                            (target, self._make_and(cond, dep), loc)
+                            Select(target, self._make_and(cond, dep), loc)
                             for target, cond, loc in cur.selects
                         ]
 
                     # Propagate dependencies to implies
                     if cur.implies:
                         cur.implies = [
-                            (target, self._make_and(cond, dep), loc)
+                            Imply(target, self._make_and(cond, dep), loc)
                             for target, cond, loc in cur.implies
                         ]
 
@@ -6740,16 +6751,9 @@ def _save_old(path):
     if islink(path):
         # Preserve symlinks
         copy_fn = shutil.copyfile
-    elif hasattr(os, "replace"):
-        # Python 3 (3.3+) only. Best choice when available, because it
-        # removes <filename>.old on both *nix and Windows.
-        copy_fn = os.replace
-    elif os.name == "posix":
-        # Removes <filename>.old on POSIX systems
-        copy_fn = os.rename
     else:
-        # Fall back on copying
-        copy_fn = shutil.copyfile
+        # os.replace removes <filename>.old on both *nix and Windows
+        copy_fn = os.replace
 
     try:
         copy_fn(path, path + ".old")
@@ -7142,11 +7146,9 @@ def _shell_fn(kconf, _, command):
 
     # Universal newlines with splitlines() (to prevent e.g. stray \r's in
     # command output on Windows), trailing newline removal, and
-    # newline-to-space conversion.
-    #
-    # On Python 3 versions before 3.6, it's not possible to specify the
-    # encoding when passing universal_newlines=True to Popen() (the 'encoding'
-    # parameter was added in 3.6), so we do this manual version instead.
+    # newline-to-space conversion. We decode manually above (rather than via
+    # Popen's encoding=) so a bad byte sequence routes through
+    # _decoding_error() with the Kconfig file and line for context.
     return "\n".join(stdout.splitlines()).rstrip("\n").replace("\n", " ")
 
 

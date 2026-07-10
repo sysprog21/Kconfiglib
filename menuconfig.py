@@ -2455,11 +2455,7 @@ def _jump_to_dialog():
 
                 except re.error as e:
                     # Bad regex. Remember the error message so we can show it.
-                    bad_re = "Bad regular expression"
-                    # re.error.msg was added in Python 3.5
-                    if hasattr(e, "msg"):
-                        bad_re += ": " + e.msg
-
+                    bad_re = "Bad regular expression: " + e.msg
                     matches = []
 
                 # Reset scroll and jump to the top of the list of matches

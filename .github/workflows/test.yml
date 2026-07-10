@@ -34,8 +34,20 @@ jobs:
       fail-fast: false
       matrix:
         # NOTE: Windows runs only the headless-portable subset (no Unix shell).
+        # Linux spans the supported Python floor (3.8) through current (3.13)
+        # to keep the python_requires claim honest; macOS/Windows pin 3.12
+        # since the version-sensitive surface is pure Python and OS-independent.
         target:
+        - python: '3.8'
+          os: Linux
+          builder: ubuntu-24.04
+        - python: '3.10'
+          os: Linux
+          builder: ubuntu-24.04
         - python: '3.12'
+          os: Linux
+          builder: ubuntu-24.04
+        - python: '3.13'
           os: Linux
           builder: ubuntu-24.04
         - python: '3.12'

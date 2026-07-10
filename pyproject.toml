@@ -1,7 +1,6 @@
 [tool.ruff]
-# Project supports >=3.6, but Ruff's minimum target is py37.
-# No py37-only syntax is introduced by the enabled rules.
-target-version = "py37"
+# Minimum supported runtime is Python 3.8 (see setup.py python_requires).
+target-version = "py38"
 # Lint installable modules and dev tools; skip non-shipping directories
 extend-exclude = ["examples", "tests", ".ci", "externals"]
 
