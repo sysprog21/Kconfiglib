@@ -554,7 +554,7 @@ import sys
 # Get rid of some attribute lookups. These are obvious in context.
 from collections import namedtuple
 from glob import iglob
-from os.path import dirname, exists, expandvars, islink, join, realpath
+from os.path import dirname, exists, expandvars, isabs, islink, join, realpath
 
 VERSION = (14, 1, 0)
 
@@ -647,9 +647,12 @@ class Kconfig:
 
     kconfig_filenames:
       A list with the filenames of all Kconfig files included in the
-      configuration, relative to $srctree (or relative to the current directory
-      if $srctree isn't set), except absolute paths (e.g.
-      'source "/foo/Kconfig"') are kept as-is.
+      configuration. Files found under $srctree (or under the current
+      directory if $srctree isn't set) are made relative to it. Anything else
+      is kept in whatever form the lookup produced: absolute for e.g.
+      'source "/foo/Kconfig"', relative for a hit from 'search_paths'.
+
+      Relative filenames are always slash-separated, including on Windows.
 
       The files are listed in the order they are source'd, starting with the
       top-level Kconfig file. If a file is source'd multiple times, it will
@@ -818,7 +821,8 @@ class Kconfig:
 
     filename/linenr:
       The current parsing location, for use in Python preprocessor functions.
-      See the module docstring.
+      See the module docstring. 'filename' follows the same rule as
+      kconfig_filenames.
     """
 
     __slots__ = (
@@ -904,6 +908,10 @@ class Kconfig:
           from the top-level directory, as environment variables will make sure
           the right Kconfig is included from there (arch/$SRCARCH/Kconfig as of
           writing).
+
+          Accepts a string or a string-returning path-like object, e.g. a
+          pathlib.Path. Locations are always reported as strings. Bytes paths
+          are not supported.
 
           If $srctree is set, 'filename' will be looked up relative to it.
           $srctree is also used to look up source'd files within Kconfig files.
@@ -1006,11 +1014,14 @@ class Kconfig:
 
         self._encoding = encoding
 
+        filename = _norm_loc(os.fspath(filename))
+
         self.srctree = os.getenv("srctree", "")
-        # A prefix we can reliably strip from glob() results to get a filename
-        # relative to $srctree. relpath() can cause issues for symlinks,
+        # A prefix we can strip from slash-normalized glob() results to get a
+        # filename relative to $srctree. join() and glob() take forward
+        # slashes on Windows too. relpath() can cause issues for symlinks,
         # because it assumes symlink/../foo is the same as foo/.
-        self._srctree_prefix = realpath(self.srctree) + os.sep
+        self._srctree_prefix = realpath(self.srctree).replace(os.sep, "/") + "/"
         self.search_paths = search_paths
         self.allow_empty_macros = allow_empty_macros
 
@@ -2183,18 +2194,22 @@ class Kconfig:
         # position and file object.
         #
         # filename:
-        #   Absolute path to file
+        #   Path to the file. Absolute for a $srctree lookup, but possibly
+        #   relative when it came from 'search_paths'.
+
+        normalized_filename = filename.replace(os.sep, "/")
 
         # Path relative to $srctree, stored in e.g. self.filename (which makes
-        # it indirectly show up in MenuNode.filename). Equals 'filename' for
+        # it indirectly show up in MenuNode.filename). Kept slash-separated so
+        # locations are stable across platforms. Equals 'filename' for
         # absolute paths passed to 'source'.
-        if filename.startswith(self._srctree_prefix):
+        if normalized_filename.startswith(self._srctree_prefix):
             # Relative path (or a redundant absolute path to within $srctree,
             # but it's probably fine to reduce those too)
-            rel_filename = filename[len(self._srctree_prefix) :]
+            rel_filename = normalized_filename[len(self._srctree_prefix) :]
         else:
-            # Absolute path
-            rel_filename = filename
+            # Outside $srctree, e.g. an absolute 'source' or a search_paths hit
+            rel_filename = _norm_loc(filename)
 
         self.kconfig_filenames.append(rel_filename)
 
@@ -5924,15 +5939,16 @@ class MenuNode:
 
     loc/filename/linenr:
       The location where the menu node appears, as a (filename, linenr) tuple
-      or as individual properties. The filename is relative to $srctree (or to
-      the current directory if $srctree isn't set), except absolute paths are
-      used for paths outside $srctree.
+      or as individual properties. 'filename' follows the same rule as
+      Kconfig.kconfig_filenames, including being slash-separated whenever it
+      is relative.
 
     include_path:
       A tuple of (filename, linenr) tuples, giving the locations of the
       'source' statements via which the Kconfig file containing this menu node
       was included. The first element is the location of the 'source' statement
-      in the top-level Kconfig file passed to Kconfig.__init__(), etc.
+      in the top-level Kconfig file passed to Kconfig.__init__(), etc. The
+      filenames follow the same rule as 'filename' above.
 
       Note that the Kconfig file of the menu node itself isn't included. Check
       'filename' and 'linenr' for that.
@@ -6691,14 +6707,18 @@ def _parenthesize(expr, type_, sc_expr_str_fn):
     return expr_str(expr, sc_expr_str_fn)
 
 
-def _ordered_unique(lst):
-    # Returns 'lst' with any duplicates removed, preserving order. This hacky
-    # version seems to be a common idiom. It relies on short-circuit evaluation
-    # and set.add() returning None, which is falsy.
+def _norm_loc(path):
+    # Returns 'path' as locations are stored: slash-separated, so the same
+    # tree yields the same locations everywhere. Absolute paths are left
+    # alone, as kconfig_filenames documents, since they are platform-specific
+    # anyway and get compared against os.path output.
 
-    seen = set()
-    seen_add = seen.add
-    return [x for x in lst if x not in seen and not seen_add(x)]
+    return path if isabs(path) else path.replace(os.sep, "/")
+
+
+def _ordered_unique(lst):
+    # dict preserves insertion order on every supported Python version.
+    return list(dict.fromkeys(lst))
 
 
 def _is_base_n(s, n):

@@ -5,11 +5,15 @@
 # locations, origins, source/rsource, symlinks,
 # node_iter(), include_path, and item lists.
 
+import ntpath
 import os
+import pathlib
+import posixpath
 
 import pytest
 
-from kconfiglib import Kconfig, KconfigError, MenuNode, Symbol, expr_value
+import kconfiglib
+from kconfiglib import Kconfig, KconfigError, MenuNode, Symbol, expr_value, _norm_loc
 
 # -- helpers -----------------------------------------------------------------
 
@@ -43,6 +47,18 @@ def _verify_prompts(items, *expected_prompts):
         node = item if isinstance(item, MenuNode) else item.nodes[0]
         actual.append(node.prompt[0])
     assert actual == list(expected_prompts), "item prompts"
+
+
+@pytest.fixture
+def klocation_env(monkeypatch):
+    """Set the env vars expanded in the 'source' statements in tests/Klocation."""
+    monkeypatch.setenv("TESTS_DIR_FROM_ENV", "tests")
+    monkeypatch.setenv("SUB_DIR_FROM_ENV", "sub")
+
+    monkeypatch.setenv("_SOURCED", "_sourced")
+    monkeypatch.setenv("_RSOURCED", "_rsourced")
+    monkeypatch.setenv("_GSOURCED", "_gsourced")
+    monkeypatch.setenv("_GRSOURCED", "_grsourced")
 
 
 # -- tricky help strings -----------------------------------------------------
@@ -112,16 +128,7 @@ g
 # -- locations, origins, source/rsource --------------------------------------
 
 
-def test_locations_and_origins(monkeypatch):
-    # Expanded in the 'source' statement in Klocation
-    monkeypatch.setenv("TESTS_DIR_FROM_ENV", "tests")
-    monkeypatch.setenv("SUB_DIR_FROM_ENV", "sub")
-
-    monkeypatch.setenv("_SOURCED", "_sourced")
-    monkeypatch.setenv("_RSOURCED", "_rsourced")
-    monkeypatch.setenv("_GSOURCED", "_gsourced")
-    monkeypatch.setenv("_GRSOURCED", "_grsourced")
-
+def test_locations_and_origins(monkeypatch, klocation_env):
     # Test twice, with $srctree as a relative and an absolute path,
     # respectively
     for srctree in ".", os.path.abspath("."):
@@ -259,19 +266,74 @@ def test_symlink_rsource(monkeypatch):
     ), "Symlink + rsource issues"
 
 
+# -- location normalization -------------------------------------------------
+
+
+def test_absolute_kconfig_rsource_locations(monkeypatch, klocation_env):
+    # rsource locations stay relative even when $srctree and the top-level
+    # filename are absolute
+    monkeypatch.setenv("srctree", os.path.abspath("."))
+    kconf = Kconfig(os.path.abspath("tests/Klocation"), warn=False)
+    _verify_locations(
+        [kconf.syms["MANY_DEF"].nodes[4]], "tests/sub/Klocation_rsourced:2"
+    )
+
+
+# Absolute paths are kept as-is, separators included, and Kconfig() has always
+# taken a path-like object as well as a str
+@pytest.mark.parametrize(
+    "arg, expected",
+    [
+        (os.path.abspath("tests/Khelp"), os.path.abspath("tests/Khelp")),
+        (pathlib.Path("tests") / "Khelp", "tests/Khelp"),
+    ],
+    ids=["absolute", "pathlib"],
+)
+def test_top_level_filename_flavors(arg, expected):
+    assert Kconfig(arg, warn=False).kconfig_filenames == [expected]
+
+
+def test_search_paths_locations_stay_relative():
+    # A hit from search_paths does not start with $srctree, so it takes the
+    # other branch in _enter_file() and must still come out as a location
+    kconf = Kconfig("tests/Ksearchtop", search_paths=["tests/sub"], warn=False)
+    assert kconf.kconfig_filenames == [
+        "tests/Ksearchtop",
+        "tests/sub/Klocation_rsourced",
+    ]
+
+
+# _norm_loc() is a pure string transform whose only platform dependencies are
+# os.sep and isabs(), so injecting ntpath exercises the real Windows rule from
+# POSIX, where os.sep is already "/" and nothing else can observe it
+@pytest.mark.parametrize(
+    "path_mod, path, expected",
+    [
+        # A backslash is a legal character in a POSIX filename, so keep it
+        (posixpath, "odd\\name/Kconfig", "odd\\name/Kconfig"),
+        (ntpath, r"sub\Kconfig", "sub/Kconfig"),
+        # The mixed form 'rsource' produces via ntpath.join() on a pattern
+        # that already contains forward slashes
+        (ntpath, r"drivers/foo\bar/Kconfig", "drivers/foo/bar/Kconfig"),
+        (ntpath, "already/slashed", "already/slashed"),
+        # Absolute paths untouched, drive letters and UNC alike
+        (ntpath, r"C:\ext\Kconfig", r"C:\ext\Kconfig"),
+        (ntpath, r"\\srv\share\Kconfig", r"\\srv\share\Kconfig"),
+    ],
+)
+def test_norm_loc(monkeypatch, path_mod, path, expected):
+    monkeypatch.setattr(os, "sep", path_mod.sep)
+    monkeypatch.setattr(kconfiglib, "isabs", path_mod.isabs)
+
+    assert _norm_loc(path) == expected
+
+
 # -- Kconfig.node_iter() -----------------------------------------------------
 
 
-def test_node_iter(monkeypatch):
+def test_node_iter(klocation_env):
     # Reuse tests/Klocation. The node_iter(unique_syms=True) case already gets
     # plenty of testing from write_config() as well.
-
-    monkeypatch.setenv("TESTS_DIR_FROM_ENV", "tests")
-    monkeypatch.setenv("SUB_DIR_FROM_ENV", "sub")
-    monkeypatch.setenv("_SOURCED", "_sourced")
-    monkeypatch.setenv("_RSOURCED", "_rsourced")
-    monkeypatch.setenv("_GSOURCED", "_gsourced")
-    monkeypatch.setenv("_GRSOURCED", "_grsourced")
 
     c = Kconfig("tests/Klocation", warn=False)
 
