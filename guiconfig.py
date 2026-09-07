@@ -1369,8 +1369,10 @@ def _img_tag(node):
 def _is_y_mode_choice_sym(item):
     # The choice mode is an upper bound on the visibility of choice symbols, so
     # we can check the choice symbols' own visibility to see if the choice is
-    # in y mode
-    return isinstance(item, Symbol) and item.choice and item.visibility == 2
+    # in y mode.
+    #
+    # 'is not None' so that a non-choice symbol yields False rather than None
+    return isinstance(item, Symbol) and item.choice is not None and item.visibility == 2
 
 
 def _tree_click(event):
@@ -2420,7 +2422,8 @@ def _update_jump_to_matches(msglabel, search_string):
         ]
     except re.error as e:
         msglabel["text"] = "Bad regular expression: " + e.msg
-        # Clear tree
+        # Clear the match list too, so it keeps agreeing with the tree
+        _jump_to_matches = []
         _jump_to_tree.set_children("")
         return
 

@@ -23,9 +23,11 @@ from kconfiglib import TRI_TO_STR  # noqa: E402
 def _clean_env(monkeypatch):
     """Save and restore environment variables between tests.
 
-    Also removes KCONFIG_ALLCONFIG to prevent accidental config loading.
+    Also removes KCONFIG_ALLCONFIG, to prevent accidental config loading, and
+    KCONFIG_SHELL_CACHE, so an ambient probe cache can't reach the tests.
     """
     monkeypatch.delenv("KCONFIG_ALLCONFIG", raising=False)
+    monkeypatch.delenv("KCONFIG_SHELL_CACHE", raising=False)
     yield
 
 

@@ -428,6 +428,84 @@ def_tristate, allowing int, hex, and string symbols to be given a type and a
 default at the same time.
 
 
+The $(python,...) function
+--------------------------
+
+$(python,<code>) runs a Python code string in this interpreter and expands to
+"y" if it completes, "n" if it raises AssertionError or exits non-zero. It is a
+Kconfiglib extension, not part of C Kconfig, and it exists so that a check that
+would otherwise need a shell one-liner per platform can be written once:
+
+  config HAVE_TOOL
+      def_bool $(python,assert shutil.which("some-tool"))
+
+The code runs with os, sys, shutil and platform in scope, plus run(argv...),
+which executes a command without a shell and returns True on exit status 0.
+Each call gets a fresh copy of that namespace, so assignments do not leak
+between calls.
+
+One caveat if you enable the probe cache below: change the environment through
+os.environ, not os.putenv(). Cached probe results are invalidated by watching
+os.environ, and os.putenv() writes the process environment behind its back, so
+a child launched by a later probe sees the new value while the cache still
+believes nothing moved. os.environ assignment does both, and is what the Python
+docs recommend anyway.
+
+Note how this differs from $(shell,...) in what it can be contained by, rather
+than in what it is allowed to do. Both run arbitrary code, and a Kconfig file
+is as trusted as the rest of the source tree, so neither grants a privilege the
+other does not. But a $(shell,...) command is a separate process: it can be
+killed, traced, or sandboxed from outside. $(python,...) runs inside the
+interpreter that imported Kconfiglib, the namespace copy is shallow so the
+module objects in it are shared, and through sys.modules a code string can
+reach the program hosting the parse. That matters because Kconfiglib is usually
+embedded in a larger build script rather than run on its own. There is no
+timeout on this path either. Treat enabling it as a decision about the host
+program, not just about Kconfig.
+
+
+Caching toolchain probes
+------------------------
+
+Most of what a Kconfig file runs through $(shell,...), $(success,...),
+$(cc-option,...) and friends is a toolchain probe: it forks a shell that forks
+a compiler, just to learn whether some flag or instruction is accepted. A large
+tree fires around a hundred of them, and on such a tree that is most of the
+time a load takes.
+
+$(cc-option,...), $(cc-option-bit,...), $(ld-option,...), $(as-instr,...),
+$(as-option,...) and $(rustc-option,...) compile a fixed dummy input, so their
+results depend on nothing but the flag and the toolchain. They are always
+remembered for the lifetime of a Kconfig instance.
+
+$(shell,...), $(success,...), $(failure,...) and $(if-success,...) run whatever
+command they are handed, which need not be a probe and need not answer the same
+way twice, so nothing is remembered for them unless you ask. Setting
+KCONFIG_SHELL_CACHE to a filename both turns that on and persists every result
+to the file, so that later runs spend nothing on probing at all:
+
+  $ export KCONFIG_SHELL_CACHE=.kconfig-shell-cache
+  $ make menuconfig
+
+The file is keyed on the working directory, the encoding, and the environment,
+so changing any variable a probe might read discards it. Variables that describe
+the invocation rather than the toolchain -- MAKEFLAGS, MAKELEVEL, COLUMNS and
+the like -- are left out, so that a cache filled by "make menuconfig" is still
+good for a recursive "make". The cost of leaving them out is that a command
+reading one of them directly, say $(shell,echo $MAKELEVEL), is served the
+answer from whichever invocation filled the cache. Do not do that. The key cannot see everything a probe can:
+replacing a compiler in place, editing a header, or updating a package database
+all go unnoticed. Delete the file when that matters, and leave the whole thing
+off unless your tree's $(shell,...) uses are probes.
+
+The file is program input, not just an optimization: what it holds becomes
+$(shell,...) output and so decides symbol values. Damaged entries are dropped
+on load, so a truncated or hand-edited file costs a re-probe rather than a
+wrong answer, but nothing authenticates a well-formed one. Point
+KCONFIG_SHELL_CACHE somewhere only the build can write, the way you would treat
+any other generated build artifact.
+
+
 Extra optional warnings
 -----------------------
 
@@ -589,7 +667,7 @@ class Kconfig:
     Represents a Kconfig configuration, e.g. for x86 or ARM. This is the set of
     symbols, choices, and menu nodes appearing in the configuration. Creating
     any number of Kconfig objects (including for different architectures) is
-    safe. Kconfiglib doesn't keep any global state.
+    safe. Kconfiglib doesn't keep any global configuration state.
 
     The following attributes are available. They should be treated as
     read-only, and some are implemented through @property magic.
@@ -825,9 +903,15 @@ class Kconfig:
       kconfig_filenames.
     """
 
+    # A full collection costs the host application's whole tracked heap. Only
+    # pay for one after a parse retained enough objects to justify it.
+    _gc_reclaim_needed = False
+    _gc_reclaim_threshold = 10_000
+
     __slots__ = (
         "_encoding",
         "_functions",
+        "_probe_cache",
         "_set_match",
         "_srctree_prefix",
         "_unset_match",
@@ -987,7 +1071,31 @@ class Kconfig:
 
           Pass True here to allow empty / undefined macros.
         """
+        # Every cyclic collection during a parse is a walk over a heap that
+        # only grows and that it cannot free, worth a sixth to a third of the
+        # parse on a large tree. Suppressed by zeroing the gen0 threshold
+        # rather than by gc.disable(), so gc.isenabled() keeps reporting what
+        # the caller and the Kconfig files think it should: a file is free to
+        # run $(python,import gc; gc.disable()) and have that survive.
+        import gc  # Only import as needed, to save some startup time
+
+        gc_thresholds = gc.get_threshold()
+        if gc.isenabled() and gc_thresholds[0] and Kconfig._gc_reclaim_needed:
+            Kconfig._gc_reclaim_needed = False
+            gc.collect()
+            # Re-read: a __del__ run by that collection can call
+            # gc.set_threshold(), and its choice should win the same way a
+            # $(python,...) one does
+            gc_thresholds = gc.get_threshold()
+        gc_count = gc.get_count()[0]
+        gc_suppressed = (0,) + gc_thresholds[1:]
+
         try:
+            # First statement inside the try: an interrupt between suppressing
+            # collection and entering the block would otherwise skip the
+            # restore below and leave the host with the collector off for good
+            gc.set_threshold(*gc_suppressed)
+
             self._init(
                 filename,
                 warn,
@@ -1006,6 +1114,15 @@ class Kconfig:
                 # them here.
                 sys.exit(cmd + str(e).strip())
             raise
+        finally:
+            if gc.get_count()[0] - gc_count >= Kconfig._gc_reclaim_threshold:
+                Kconfig._gc_reclaim_needed = True
+            # Only if nothing during the parse set its own thresholds. A
+            # $(python,...) that sets exactly (0, ...) is indistinguishable
+            # from our own suppression and gets undone -- the enabled bit,
+            # which is what gc.disable() moves, is never touched either way
+            if gc.get_threshold() == gc_suppressed:
+                gc.set_threshold(*gc_thresholds)
 
     def _init(
         self, filename, warn, warn_to_stderr, encoding, search_paths, allow_empty_macros
@@ -1106,6 +1223,14 @@ class Kconfig:
         except ImportError:
             pass
 
+        # Only now. Importing that module ran arbitrary top-level Python, which
+        # can chdir or write to os.environ, and the cache has to snapshot the
+        # context its probes will actually run in. Snapshotting earlier stamped
+        # the file with the pre-import context and then measured probes in the
+        # post-import one, so a later run could be served a result from a
+        # directory or environment it never ran in.
+        self._probe_cache = _ProbeCache(os.getenv("KCONFIG_SHELL_CACHE"), encoding)
+
         # This determines whether previously unseen symbols are registered.
         # They shouldn't be if we parse expressions after parsing, as part of
         # Kconfig.eval_string().
@@ -1190,6 +1315,8 @@ class Kconfig:
         # Add extra dependencies from choices to choice symbols that get
         # awkward during dependency loop detection
         self._add_choice_deps()
+
+        self._probe_cache.save()
 
     @property
     def mainmenu_text(self):
@@ -2094,12 +2221,18 @@ class Kconfig:
 
         self.filename = None
 
-        self._tokens = self._tokenize("if " + s)
-        # Strip "if " to avoid giving confusing error messages
-        self._line = s
-        self._tokens_i = 1  # Skip the 'if' token
+        # Arbitrary application code may have run since the last lookup
+        self._probe_cache.context_may_have_changed()
 
-        return expr_value(self._expect_expr_and_eol())
+        try:
+            self._tokens = self._tokenize("if " + s)
+            # Strip "if " to avoid giving confusing error messages
+            self._line = s
+            self._tokens_i = 1  # Skip the 'if' token
+
+            return expr_value(self._expect_expr_and_eol())
+        finally:
+            self._probe_cache.save()
 
     def unset_values(self):
         """
@@ -2953,7 +3086,46 @@ class Kconfig:
                     f"to {fn}, expected {expected_args}, got {len(args) - 1}"
                 )
 
-            return py_fn(self, *args)
+            # Identity rather than set membership. A KCONFIG_FUNCTIONS module
+            # may register any callable, and testing one for membership runs
+            # its own __hash__ and __eq__, which are free to raise anything
+            # they like and would take the parse down with them. Both sets
+            # hold functions defined in this file, so the only question is
+            # whether py_fn is one of them. The scan costs a few hundred
+            # nanoseconds against a hash lookup, on a path that runs once per
+            # preprocessor function call.
+            is_probe = any(py_fn is fn for fn in _PROBE_FNS)
+            is_command = any(py_fn is fn for fn in _COMMAND_FNS)
+
+            if is_probe or (is_command and self._probe_cache.enabled):
+                self._probe_cache.sync_context()
+                key = self._probe_cache.key(args)
+                cached = self._probe_cache.get(key)
+                if cached is not None:
+                    return cached[0]
+
+                res = py_fn(self, *args)
+                self._probe_cache.add(key, res)
+                return res
+
+            if is_command or py_fn is _shell_fn:
+                # $(shell,...) is in neither set above because it caches itself
+                # -- it also has to replay what the command wrote to stderr --
+                # and a command function lands here when the cache is off. Both
+                # only fork, so they can no more move the environment or the
+                # working directory than the probes can. Landing them below by
+                # omission made every following probe pay a getcwd().
+                return py_fn(self, *args)
+
+            # Anything else here may run Python in this process (a
+            # $(python,...) body, a KCONFIG_FUNCTIONS function) and may expand
+            # further macros before it returns, so the working directory is
+            # re-read on every lookup until it has.
+            self._probe_cache.enter_untrusted()
+            try:
+                return py_fn(self, *args)
+            finally:
+                self._probe_cache.leave_untrusted()
 
         # Environment variables are tried last
         if fn in os.environ:
@@ -6306,7 +6478,11 @@ class Variable:
 
         Raises a KconfigError if the expansion seems to be stuck in a loop.
         """
-        return self.kconfig._fn_val((self.name,) + args)
+        self.kconfig._probe_cache.context_may_have_changed()
+        try:
+            return self.kconfig._fn_val((self.name,) + args)
+        finally:
+            self.kconfig._probe_cache.save()
 
     def __repr__(self):
         return "<variable {}, {}, value '{}'>".format(
@@ -7146,7 +7322,30 @@ def _error_if_fn(kconf, _, cond, msg):
 
 
 def _shell_fn(kconf, _, command):
-    import subprocess  # Only import as needed, to save some startup time
+    # $(shell,...) runs an arbitrary command, which need not be a probe and
+    # need not give the same answer twice. Results are only remembered when the
+    # user opts in by naming a cache file.
+    #
+    # Unlike every other command-running function here, this one has no
+    # _SUBPROCESS_TIMEOUT, and that is deliberate rather than an oversight. The
+    # others answer yes or no, so cutting them off just means "no". This one's
+    # stdout goes straight into symbol values and out into the .config, which
+    # has to match the C tools character for character -- and C Kconfig waits
+    # forever too. Capping it would swap a hang for silently different output,
+    # which is the worse failure. A $(shell,...) that hangs, hangs the load.
+    cache = kconf._probe_cache
+    if cache.enabled:
+        cache.sync_context()
+        key = cache.key(("shell", command))
+        cached = cache.get(key)
+        if cached is not None:
+            stdout, stderr = cached
+            _warn_shell_stderr(kconf, command, stderr)
+            return stdout
+
+    # Only import as needed, to save some startup time -- and a run served
+    # entirely from the cache never gets here at all
+    import subprocess
 
     stdout, stderr = subprocess.Popen(
         command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -7158,18 +7357,31 @@ def _shell_fn(kconf, _, command):
     except UnicodeDecodeError as e:
         _decoding_error(e, kconf.filename, kconf.linenr)
 
-    if stderr:
-        kconf._warn(
-            "'{}' wrote to stderr: {}".format(command, "\n".join(stderr.splitlines())),
-            kconf.loc,
-        )
+    _warn_shell_stderr(kconf, command, stderr)
 
     # Universal newlines with splitlines() (to prevent e.g. stray \r's in
     # command output on Windows), trailing newline removal, and
     # newline-to-space conversion. We decode manually above (rather than via
     # Popen's encoding=) so a bad byte sequence routes through
     # _decoding_error() with the Kconfig file and line for context.
-    return "\n".join(stdout.splitlines()).rstrip("\n").replace("\n", " ")
+    stdout = "\n".join(stdout.splitlines()).rstrip("\n").replace("\n", " ")
+
+    # Anything the command wrote to stderr is remembered alongside its output,
+    # so that a run served from the cache warns exactly like the run that
+    # filled the cache. The location is not: it is regenerated from wherever
+    # the cached result is used.
+    if cache.enabled:
+        cache.add(key, stdout, stderr)
+    return stdout
+
+
+def _warn_shell_stderr(kconf, command, stderr):
+    # No-op when the command was quiet, so that callers need no guard
+    if stderr:
+        kconf._warn(
+            "'{}' wrote to stderr: {}".format(command, "\n".join(stderr.splitlines())),
+            kconf.loc,
+        )
 
 
 def _run_helper(*argv):
@@ -7223,6 +7435,16 @@ def _python_fn(kconf, _, code=""):
 # Prevents indefinite hangs from stuck compilers or
 # linkers.  Generous enough for cross-compilation on
 # slow systems; tight enough to catch real hangs.
+#
+# This covers $(success,...), $(failure,...),
+# $(if-success,...) and the $(cc-option,...) family --
+# everything routed through _run_cmd()/_run_argv().  A
+# timeout there is safe because those all reduce to a
+# yes/no about the toolchain, and a probe that never
+# answers is a probe that failed.
+#
+# $(shell,...) deliberately has no timeout; see
+# _shell_fn().
 _SUBPROCESS_TIMEOUT = 30
 
 
@@ -7381,6 +7603,279 @@ def _rustc_option_fn(kconf, _, option):
             return "y" if _run_argv(argv) else "n"
     except Exception:
         return "n"
+
+
+# Bumped whenever the layout of the cache file changes, so that a file written
+# by an older Kconfiglib is discarded rather than misread
+_PROBE_CACHE_VERSION = 3
+
+# Environment variables left out of the cache fingerprint. Everything else goes
+# in, since a probe can read anything, but these are set by make and by the
+# shell and describe the invocation rather than the toolchain. Leaving them in
+# makes the cache useless for the workflow it exists for: `make menuconfig` runs
+# at MAKELEVEL 1 and a recursive `make` at 2, `make -j` adds --jobserver-fds to
+# MAKEFLAGS, and a run from the shell has none of them. Each context would key
+# differently, and since the file holds one key, each would evict the last.
+# MANPATH is here for the same reason -- macOS make injects the SDK one -- and
+# because only man reads it.
+_IGNORED_ENV = frozenset(
+    (
+        "COLUMNS",
+        "KCONFIG_SHELL_CACHE",
+        "LINES",
+        "MANPATH",
+        "MAKEFLAGS",
+        "MAKELEVEL",
+        "MAKE_TERMERR",
+        "MAKE_TERMOUT",
+        "MFLAGS",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+    )
+)
+
+
+class _ProbeCache:
+    # Remembers the results of toolchain probes. See "Caching toolchain probes"
+    # in the module docstring for which ones and why.
+    #
+    # 'enabled' says whether $KCONFIG_SHELL_CACHE named a file. It gates two
+    # things: persisting results across runs, and caching the probes that run
+    # an arbitrary command. Memoizing the dedicated probes needs no opt-in and
+    # happens either way.
+    #
+    # Entries are keyed by the function name and its arguments joined on NULs,
+    # which Kconfig text cannot contain, so two functions can never collide.
+    # Values are (result, stderr) pairs; only $(shell,...) ever has stderr to
+    # store, and it is kept so that a cached run warns like the run that filled
+    # the cache.
+
+    __slots__ = (
+        "_ctx_cwd",
+        "_ctx_dirty",
+        "_ctx_env",
+        "_ctx_untrusted",
+        "_dirty",
+        "_fingerprint",
+        "_path",
+        "_persistable",
+        "_pristine",
+        "_results",
+        "enabled",
+    )
+
+    def __init__(self, path, encoding):
+        if path and not isabs(path):
+            # join("", path) == path, which is what a missing cwd used to leave
+            path = join(_getcwd(), path)
+        self._path = path
+        self.enabled = bool(path)
+        self._results = {}
+        self._dirty = False
+        self._ctx_cwd = _getcwd()
+        self._ctx_env = dict(_raw_environ())
+        self._ctx_dirty = False
+        self._ctx_untrusted = 0
+        self._pristine = True
+        self._persistable = {}
+        self._fingerprint = None
+        if self.enabled:
+            self._fingerprint = _probe_fingerprint(encoding)
+            self._load()
+
+    def key(self, args):
+        return "\0".join(args)
+
+    def enter_untrusted(self):
+        self._ctx_untrusted += 1
+
+    def leave_untrusted(self):
+        self._ctx_untrusted -= 1
+        self._ctx_dirty = True
+
+    def context_may_have_changed(self):
+        # Re-entry from the host, between a parse and a later eval_string()
+        self._ctx_dirty = True
+
+    def sync_context(self):
+        # Entries hold for one environment and one working directory. Compare
+        # the live ones against the ones the entries were made under, and start
+        # over when they moved.
+        #
+        # The environment is compared on every lookup: one dict compare at
+        # ~1 us, against ~120 us to hash it. That is what makes this affordable
+        # here rather than behind a list of functions trusted to change
+        # nothing, which would have to be kept exhaustive forever. The working
+        # directory needs a syscall, so it is re-read only when in-process
+        # Python has run since the last lookup -- a child cannot move ours.
+        env = _raw_environ()
+        if self._ctx_dirty or self._ctx_untrusted:
+            self._ctx_dirty = False
+            cwd = _getcwd()
+        else:
+            cwd = self._ctx_cwd
+        if env != self._ctx_env or cwd != self._ctx_cwd:
+            self._ctx_cwd = cwd
+            self._ctx_env = dict(env)
+            self._results = {}
+            self._pristine = False
+
+    def get(self, key):
+        return self._results.get(key)
+
+    def add(self, key, result, stderr=""):
+        self._results[key] = (result, stderr)
+        if self.enabled and self._pristine:
+            # Only results measured in the context the file is stamped with can
+            # go in it. Skipped entirely when no file was named, since save()
+            # would have nowhere to put them
+            self._persistable[key] = (result, stderr)
+            self._dirty = True
+
+    def _load(self):
+        import json  # Only import as needed, to save some startup time
+
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                cached = json.load(f)
+        except (OSError, ValueError):
+            # No cache yet, or one we can't read. Not worth complaining about
+            return
+
+        if (
+            not isinstance(cached, dict)
+            or cached.get("version") != _PROBE_CACHE_VERSION
+            or cached.get("fingerprint") != self._fingerprint
+        ):
+            return
+
+        results = cached.get("results")
+        if not isinstance(results, dict):
+            return
+
+        # The cache is ordinary build output, and anything can leave a
+        # half-truncated or hand-edited file behind. Keep only the entries that
+        # have the shape we wrote, so that a damaged file costs a re-probe
+        # rather than a crash or a wrong answer.
+        self._results = {
+            key: (val[0], val[1])
+            for key, val in results.items()
+            if isinstance(val, list)
+            and len(val) == 2
+            and isinstance(val[0], str)
+            and isinstance(val[1], str)
+        }
+        # A separate dict rather than an alias of _results. The two diverge the
+        # moment the context moves, and aliasing them until then only works
+        # because that rebind happens to coincide with _pristine going False
+        self._persistable = dict(self._results)
+
+    def save(self):
+        if not self.enabled or not self._dirty:
+            return
+
+        # Only import as needed, to save some startup time
+        import json
+        import tempfile
+
+        # Written to a temporary file in the same directory and renamed into
+        # place, so that nothing ever reads a half-written cache. mkstemp()
+        # creates it exclusively under an unpredictable name, so two threads or
+        # two builds can't collide on it and it can't be pre-created as a
+        # symlink. Concurrent writers still last-write-wins, which for a cache
+        # costs a re-probe and nothing else.
+        directory = dirname(self._path) or "."
+        try:
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".kconfig-probe-")
+        except OSError:
+            return
+
+        # Cleanup is keyed on whether the rename happened, not on the kind of
+        # failure. Anything that stops us short of it -- a full disk, but also
+        # a Ctrl-C between mkstemp() and os.replace() -- would otherwise leave
+        # a .kconfig-probe-* file behind in the build directory for good.
+        renamed = False
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "version": _PROBE_CACHE_VERSION,
+                        "fingerprint": self._fingerprint,
+                        "results": self._persistable,
+                    },
+                    f,
+                )
+            os.replace(tmp, self._path)
+            renamed = True
+            self._dirty = False
+        except OSError:
+            pass
+        finally:
+            if not renamed:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+
+def _raw_environ():
+    # os._Environ keeps the undecoded mapping in _data (shared with os.environb
+    # where that exists), so comparing it detects any change os.environ can
+    # make without decoding 70-odd values. Falls back to a snapshot of the
+    # public mapping: os.environ does compare equal to a dict (Mapping.__eq__
+    # builds one to do it), so returning it would also work, but then the
+    # comparison depends on an ABC detail and costs the same dict build anyway.
+    try:
+        return os.environ._data
+    except AttributeError:
+        return dict(os.environ)
+
+
+def _getcwd():
+    # "" when the working directory has been removed out from under us, so that
+    # callers get something comparable instead of an OSError
+    try:
+        return os.getcwd()
+    except OSError:
+        return ""
+
+
+def _probe_fingerprint(encoding):
+    import hashlib  # Only import as needed, to save some startup time
+    import json
+
+    raw = json.dumps(
+        [
+            _getcwd(),
+            encoding,
+            sorted((k, v) for k, v in os.environ.items() if k not in _IGNORED_ENV),
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode("ascii")).hexdigest()
+
+
+# Preprocessor functions whose result is a pure function of their arguments and
+# of the toolchain, and that pay for a fork to find it out. _fn_val() always
+# memoizes these.
+_PROBE_FNS = frozenset(
+    (
+        _cc_option_fn,
+        _cc_option_bit_fn,
+        _ld_option_fn,
+        _as_instr_fn,
+        _as_option_fn,
+        _rustc_option_fn,
+    )
+)
+
+# Preprocessor functions that run whatever command they are handed. Almost
+# always a probe, but nothing says they have to be, so their results are only
+# remembered when $KCONFIG_SHELL_CACHE says to. $(shell,...) is absent because
+# it caches itself: it also has to replay what the command wrote to stderr.
+_COMMAND_FNS = frozenset((_success_fn, _failure_fn, _if_success_fn))
 
 
 #

@@ -4,3 +4,11 @@ build/
 dist/
 mconf/.git/
 mconf/build/
+
+# Coverage reports (see the selftest CI job)
+coverage.xml
+.coverage
+
+# Output of running the tools on this repository's own Kconfig
+/.config
+/.config.old
