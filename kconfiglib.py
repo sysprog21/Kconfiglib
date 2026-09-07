@@ -3086,15 +3086,16 @@ class Kconfig:
                     f"to {fn}, expected {expected_args}, got {len(args) - 1}"
                 )
 
-            # A KCONFIG_FUNCTIONS function is any callable, and a callable need
-            # not be hashable -- a dataclass instance with eq=True is not, and
-            # a set lookup on one raises TypeError. Such a callable is never
-            # one of ours, so treat the lookup failing as "no".
-            try:
-                is_probe = py_fn in _PROBE_FNS
-                is_command = py_fn in _COMMAND_FNS
-            except TypeError:
-                is_probe = is_command = False
+            # Identity rather than set membership. A KCONFIG_FUNCTIONS module
+            # may register any callable, and testing one for membership runs
+            # its own __hash__ and __eq__, which are free to raise anything
+            # they like and would take the parse down with them. Both sets
+            # hold functions defined in this file, so the only question is
+            # whether py_fn is one of them. The scan costs a few hundred
+            # nanoseconds against a hash lookup, on a path that runs once per
+            # preprocessor function call.
+            is_probe = any(py_fn is fn for fn in _PROBE_FNS)
+            is_command = any(py_fn is fn for fn in _COMMAND_FNS)
 
             if is_probe or (is_command and self._probe_cache.enabled):
                 self._probe_cache.sync_context()
