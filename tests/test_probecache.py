@@ -221,14 +221,32 @@ def test_parsing_preserves_gc_changes(tmp_path, monkeypatch):
         gc.enable()
 
 
+def _tree_that_trips_the_reclaim(tmp_path, name):
+    """A Kconfig large enough to set Kconfig._gc_reclaim_needed here.
+
+    Hard-coding a symbol count pins the test to how many tracked objects one
+    CPython happens to allocate per symbol. An interpreter that allocates
+    fewer would drop under _gc_reclaim_threshold, and the gate tests would
+    quietly stop exercising the gate rather than fail. Grow until the flag
+    actually trips instead.
+    """
+    path = tmp_path / name
+    n = 1000
+    while n <= 64000:
+        path.write_text("".join(f"config S{i}\n\tbool\n" for i in range(n)))
+        Kconfig._gc_reclaim_needed = False
+        Kconfig(path, warn=False)
+        if Kconfig._gc_reclaim_needed:
+            return path
+        n *= 2
+    raise AssertionError("no tree size tripped _gc_reclaim_threshold")
+
+
 def test_full_gc_is_gated_by_a_prior_large_parse(tmp_path, monkeypatch):
     small = tmp_path / "small"
     small.write_text("")
-    # Comfortably over _gc_reclaim_threshold: 1000 configs lands at only 1.3x
-    # it, so an interpreter tracking fewer objects per symbol would quietly
-    # turn this into a test that the gate never fires
-    large = tmp_path / "large"
-    large.write_text("".join(f"config S{i}\n\tbool\n" for i in range(3000)))
+    # Sized before gc.collect is stubbed out, since it needs real parses
+    large = _tree_that_trips_the_reclaim(tmp_path, "large")
     monkeypatch.setattr(Kconfig, "_gc_reclaim_needed", False)
 
     collections = []
@@ -247,16 +265,12 @@ def test_full_gc_is_gated_by_a_prior_large_parse(tmp_path, monkeypatch):
 
 
 def test_parse_reclaims_cycles_from_a_prior_tree(tmp_path):
-    # Large enough to trip _gc_reclaim_threshold with margin, so the next
-    # construction really does collect
-    (tmp_path / "Kconfig").write_text(
-        "".join(f"config S{i}\n\tbool\n" for i in range(3000))
-    )
+    kconfig = _tree_that_trips_the_reclaim(tmp_path, "Kconfig")
     thresholds = gc.get_threshold()
     gc.collect()
     gc.set_threshold(1_000_000, *thresholds[1:])
     try:
-        old = Kconfig(tmp_path / "Kconfig")
+        old = Kconfig(kconfig)
 
         class Tracker:
             pass
