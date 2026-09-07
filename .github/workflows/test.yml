@@ -68,7 +68,7 @@ jobs:
       run: |
         set -euo pipefail
         python -m pip install --user --upgrade pip
-        python -m pip install --user setuptools wheel pytest
+        python -m pip install --user setuptools wheel pytest pytest-cov
 
     - name: Check out Kconfiglib source code
       uses: actions/checkout@v6
@@ -83,8 +83,31 @@ jobs:
           python -m pytest tests/test_preprocess.py \
             -k "test_user_defined or test_success_failure or test_python_fn or test_kconfig_warn"
         else
-          python -m pytest tests/ --ignore=tests/test_conformance.py
+          # Coverage on the jobs that run the whole suite. The floor is a
+          # backstop against a large drop, not a ratchet; raise it as
+          # coverage improves.
+          #
+          # 35 is set against what these runners report, which is 40. Do not
+          # calibrate it from a local run on Python 3.14 or newer: coverage
+          # switches to the sys.monitoring backend there and scores the same
+          # suite at 51, and a floor taken from that number fails every job
+          # here. COVERAGE_CORE=ctrace reproduces the runner figure locally.
+          python -m pytest tests/ --ignore=tests/test_conformance.py \
+            --cov=kconfiglib --cov=menuconfig --cov=guiconfig --cov=rawterm \
+            --cov-report=term --cov-report=xml:coverage.xml \
+            --cov-fail-under=35
         fi
+
+    - name: Store coverage report
+      # Only the jobs that ran the full suite produce one. !cancelled() rather
+      # than always(), so that a coverage failure still uploads the report
+      # explaining it but a cancelled run doesn't stop to upload anything.
+      if: ${{ !cancelled() && matrix.target.headless-only != true }}
+      uses: actions/upload-artifact@v6
+      with:
+        name: coverage-${{ matrix.target.os }}-py${{ matrix.target.python }}
+        path: coverage.xml
+        if-no-files-found: ignore
 
     - name: Validate rawterm and menuconfig (Unix)
       # Exercises rawterm Color/Style/Region compositing, terminal init/close
