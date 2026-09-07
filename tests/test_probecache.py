@@ -1,8 +1,11 @@
 """Tests for the toolchain probe cache (see KCONFIG_SHELL_CACHE)."""
 
+import gc
+import inspect
 import json
 import os
 import sys
+import weakref
 
 import pytest
 
@@ -202,6 +205,73 @@ def test_probe_cache_tracks_in_parse_environment_changes(tmp_path, monkeypatch):
 
     assert c.syms["A"].str_value == "y"
     assert c.syms["B"].str_value == "n"
+
+
+def test_parsing_preserves_gc_changes(tmp_path, monkeypatch):
+    (tmp_path / "Kconfig").write_text(
+        "config A\n\tdef_bool $(python,import gc; gc.disable())\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert gc.isenabled()
+    try:
+        Kconfig("Kconfig", warn_to_stderr=False)
+        assert not gc.isenabled()
+    finally:
+        gc.enable()
+
+
+def test_full_gc_is_gated_by_a_prior_large_parse(tmp_path, monkeypatch):
+    small = tmp_path / "small"
+    small.write_text("")
+    # Comfortably over _gc_reclaim_threshold: 1000 configs lands at only 1.3x
+    # it, so an interpreter tracking fewer objects per symbol would quietly
+    # turn this into a test that the gate never fires
+    large = tmp_path / "large"
+    large.write_text("".join(f"config S{i}\n\tbool\n" for i in range(3000)))
+    monkeypatch.setattr(Kconfig, "_gc_reclaim_needed", False)
+
+    collections = []
+    monkeypatch.setattr(gc, "collect", lambda: collections.append(None))
+
+    Kconfig(small)
+    Kconfig(small)
+    assert not collections
+
+    Kconfig(large)
+    assert not collections
+    Kconfig(small)
+    assert len(collections) == 1
+    Kconfig(small)
+    assert len(collections) == 1
+
+
+def test_parse_reclaims_cycles_from_a_prior_tree(tmp_path):
+    # Large enough to trip _gc_reclaim_threshold with margin, so the next
+    # construction really does collect
+    (tmp_path / "Kconfig").write_text(
+        "".join(f"config S{i}\n\tbool\n" for i in range(3000))
+    )
+    thresholds = gc.get_threshold()
+    gc.collect()
+    gc.set_threshold(1_000_000, *thresholds[1:])
+    try:
+        old = Kconfig(tmp_path / "Kconfig")
+
+        class Tracker:
+            pass
+
+        tracker = Tracker()
+        old._functions["tracker"] = tracker
+        stale = weakref.ref(tracker)
+        del old, tracker
+        assert stale() is not None
+
+        Kconfig(tmp_path / "Kconfig")
+        assert stale() is None
+    finally:
+        gc.set_threshold(*thresholds)
+        gc.collect()
 
 
 def test_save_leaves_no_temporary_files(tree):
@@ -480,3 +550,51 @@ def test_import_time_environ_write_does_not_kill_persistence(tmp_path, monkeypat
 
     assert c._probe_cache._pristine
     assert (tmp_path / "probe-cache.json").exists()
+
+
+def test_gc_thresholds_survive_an_interrupt_while_suppressing(tmp_path, monkeypatch):
+    """Suppression happens inside the try whose finally restores it.
+
+    Outside it, an interrupt landing in that window left the host process with
+    automatic collection off for good.
+    """
+    (tmp_path / "Kconfig").write_text('mainmenu "gc"\n\nconfig A\n\tbool\n')
+    monkeypatch.chdir(tmp_path)
+
+    # The first line that runs *after* suppression takes effect. Targeting the
+    # set_threshold line itself would raise before it executed, which leaks
+    # nothing and would make this test pass either way.
+    src, start = inspect.getsourcelines(Kconfig.__init__)
+    suppress_i = next(
+        i for i, line in enumerate(src) if "gc.set_threshold(*gc_suppressed)" in line
+    )
+    target = next(
+        start + i
+        for i in range(suppress_i + 1, len(src))
+        if src[i].strip() and not src[i].lstrip().startswith("#")
+    )
+    before = gc.get_threshold()
+
+    def tracer(frame, event, arg):
+        if (
+            event == "line"
+            and frame.f_code.co_filename.endswith("kconfiglib.py")
+            and frame.f_lineno == target
+        ):
+            sys.settrace(None)
+            raise KeyboardInterrupt
+        return tracer
+
+    sys.settrace(tracer)
+    try:
+        Kconfig("Kconfig", warn_to_stderr=False)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.settrace(None)
+
+    # Read before restoring, or the cleanup makes the assertion vacuous
+    after = gc.get_threshold()
+    gc.set_threshold(*before)
+
+    assert after == before

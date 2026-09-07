@@ -667,7 +667,7 @@ class Kconfig:
     Represents a Kconfig configuration, e.g. for x86 or ARM. This is the set of
     symbols, choices, and menu nodes appearing in the configuration. Creating
     any number of Kconfig objects (including for different architectures) is
-    safe. Kconfiglib doesn't keep any global state.
+    safe. Kconfiglib doesn't keep any global configuration state.
 
     The following attributes are available. They should be treated as
     read-only, and some are implemented through @property magic.
@@ -903,6 +903,11 @@ class Kconfig:
       kconfig_filenames.
     """
 
+    # A full collection costs the host application's whole tracked heap. Only
+    # pay for one after a parse retained enough objects to justify it.
+    _gc_reclaim_needed = False
+    _gc_reclaim_threshold = 10_000
+
     __slots__ = (
         "_encoding",
         "_functions",
@@ -1066,7 +1071,31 @@ class Kconfig:
 
           Pass True here to allow empty / undefined macros.
         """
+        # Every cyclic collection during a parse is a walk over a heap that
+        # only grows and that it cannot free, worth a sixth to a third of the
+        # parse on a large tree. Suppressed by zeroing the gen0 threshold
+        # rather than by gc.disable(), so gc.isenabled() keeps reporting what
+        # the caller and the Kconfig files think it should: a file is free to
+        # run $(python,import gc; gc.disable()) and have that survive.
+        import gc  # Only import as needed, to save some startup time
+
+        gc_thresholds = gc.get_threshold()
+        if gc.isenabled() and gc_thresholds[0] and Kconfig._gc_reclaim_needed:
+            Kconfig._gc_reclaim_needed = False
+            gc.collect()
+            # Re-read: a __del__ run by that collection can call
+            # gc.set_threshold(), and its choice should win the same way a
+            # $(python,...) one does
+            gc_thresholds = gc.get_threshold()
+        gc_count = gc.get_count()[0]
+        gc_suppressed = (0,) + gc_thresholds[1:]
+
         try:
+            # First statement inside the try: an interrupt between suppressing
+            # collection and entering the block would otherwise skip the
+            # restore below and leave the host with the collector off for good
+            gc.set_threshold(*gc_suppressed)
+
             self._init(
                 filename,
                 warn,
@@ -1085,6 +1114,15 @@ class Kconfig:
                 # them here.
                 sys.exit(cmd + str(e).strip())
             raise
+        finally:
+            if gc.get_count()[0] - gc_count >= Kconfig._gc_reclaim_threshold:
+                Kconfig._gc_reclaim_needed = True
+            # Only if nothing during the parse set its own thresholds. A
+            # $(python,...) that sets exactly (0, ...) is indistinguishable
+            # from our own suppression and gets undone -- the enabled bit,
+            # which is what gc.disable() moves, is never touched either way
+            if gc.get_threshold() == gc_suppressed:
+                gc.set_threshold(*gc_thresholds)
 
     def _init(
         self, filename, warn, warn_to_stderr, encoding, search_paths, allow_empty_macros
