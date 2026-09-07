@@ -134,7 +134,13 @@ def bench_gui_tree_walk(kconf, repeat):
     the tree walk it drives rather than the widget updates. A regression in
     how many nodes get visited shows up here; one in Tk itself does not.
     """
-    import guiconfig
+    try:
+        import guiconfig
+    except ImportError as e:
+        # guiconfig pulls in tkinter, which is an optional part of a Python
+        # installation. Skip this one phase rather than taking the whole run
+        # down with it; main() already renders a phase with no timing.
+        return None, {"skipped": f"{type(e).__name__}: {e}"}
 
     guiconfig._kconf = kconf
     guiconfig._show_all = False
