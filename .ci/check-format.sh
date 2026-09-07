@@ -19,7 +19,11 @@ cd "${REPO_ROOT}" || exit 1
 # committed, and --exclude-standard honours .gitignore and .git/info/exclude, so
 # anything deliberately kept out of the repo stays out.
 git_sources() {
-	git ls-files --cached --others --exclude-standard -- "$1" | sort -u
+	# Filtered to what is on disk: --cached still lists a tracked file that
+	# has been deleted in the working tree, and shfmt and black both error
+	# out on a path that is not there.
+	git ls-files --cached --others --exclude-standard -- "$1" | sort -u |
+		while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done
 }
 
 SH_SOURCES=$(git_sources '*.sh')
