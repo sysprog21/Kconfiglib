@@ -1,0 +1,113 @@
+mainmenu "UI render test"
+
+# Every branch of menuconfig._value_str()/_node_str() and their guiconfig
+# counterparts is reachable from this tree. See tests/test_ui_render.py.
+
+config MODULES
+	bool "Modules"
+	option modules
+	default y
+
+config BOOL_SYM
+	bool "A bool"
+
+config TRI_SYM
+	tristate "A tristate"
+
+config STR_SYM
+	string "A string"
+	default "hello"
+
+config INT_SYM
+	int "An int"
+	default 7
+
+config HEX_SYM
+	hex "A hex"
+	default 0x1f
+
+# Pinned to y by the select, so assignable has a single element
+config SELECTED
+	bool "Selected one"
+
+config SELECTOR
+	bool "The selector"
+	default y
+	select SELECTED
+
+config IMPLIED
+	tristate "Implied one"
+
+config IMPLIER
+	bool "The implier"
+	default y
+	imply IMPLIED
+
+# Three selectors, to exercise the "+N" truncation in _get_force_info()
+config MANY_SELECTED
+	bool "Selected by several"
+
+config SEL_A
+	bool "Selector A"
+	default y
+	select MANY_SELECTED
+
+config SEL_B
+	bool "Selector B"
+	default y
+	select MANY_SELECTED
+
+config SEL_C
+	bool "Selector C"
+	default y
+	select MANY_SELECTED
+
+# No prompt: only shown in show-all mode
+config PROMPTLESS
+	bool
+	default y
+
+choice
+	prompt "A choice"
+	default CHOICE_B
+
+config CHOICE_A
+	bool "Choice A"
+
+config CHOICE_B
+	bool "Choice B"
+
+endchoice
+
+menu "A menu"
+
+config IN_MENU
+	bool "In the menu"
+
+endmenu
+
+menu "Empty menu"
+endmenu
+
+comment "A comment"
+
+menuconfig MENUCONFIG_SYM
+	bool "A menuconfig"
+	default y
+
+if MENUCONFIG_SYM
+
+config UNDER_MENUCONFIG
+	bool "Under it"
+
+endif
+
+# A plain 'config' with dependent symbols after it gets an implicit submenu.
+# Its children are indented, since the parent is not a 'menuconfig'.
+config IMPLICIT_PARENT
+	bool "Implicit parent"
+	default y
+
+config IMPLICIT_CHILD
+	bool "Implicit child"
+	depends on IMPLICIT_PARENT

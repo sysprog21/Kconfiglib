@@ -2314,6 +2314,75 @@ def _draw_frame(win, title):
     _draw_title(win, title, win_width)
 
 
+def _jump_to_matches(search_string):
+    # Returns a (matches, bad_re) pair for 'search_string': the menu nodes
+    # matching every whitespace-separated regex in it, and an error message if
+    # one of those regexes did not compile (None otherwise).
+    #
+    # Lifted out of _jump_to_dialog() so that it can be tested without a
+    # terminal, and so that it stays comparable to
+    # guiconfig._update_jump_to_matches(), which does the same job.
+
+    try:
+        # We could use re.IGNORECASE here instead of lower(), but this is
+        # noticeably less jerky while inputting regexes like '.*debug$' (though
+        # the '.*' is redundant there). Those probably have bad interactions
+        # with re.search(), which matches anywhere in the string.
+        #
+        # It's not horrible either way. Just a bit smoother.
+        prefix = _kconf.config_prefix.lower()
+        prefix_len = len(prefix)
+
+        regex_searches = [
+            re.compile(token[prefix_len:] if token.startswith(prefix) else token).search
+            for token in search_string.lower().split()
+        ]
+    except re.error as e:
+        # Only re.compile() raises this; a compiled pattern's search() does not,
+        # so nothing below needs to be inside the try
+        return [], "Bad regular expression: " + e.msg
+
+    matches = []
+    add_match = matches.append
+
+    # Search symbols and choices
+
+    for node in _sorted_sc_nodes():
+        # Symbol/choice
+        sc = node.item
+
+        for search in regex_searches:
+            # Both the name and the prompt might be missing, since we're
+            # searching both symbols and choices
+
+            # Does the regex match either the symbol name or the prompt (if
+            # any)?
+            if not (
+                sc.name
+                and search(sc.name.lower())
+                or node.prompt
+                and search(node.prompt[0].lower())
+            ):
+
+                # Give up on the first regex that doesn't match, to speed
+                # things up a bit when multiple regexes are entered
+                break
+
+        else:
+            add_match(node)
+
+    # Search menus and comments
+
+    for node in _sorted_menu_comment_nodes():
+        for search in regex_searches:
+            if not search(node.prompt[0].lower()):
+                break
+        else:
+            add_match(node)
+
+    return matches, None
+
+
 def _jump_to_dialog():
     # Implements the jump-to dialog, where symbols can be looked up via
     # incremental search and jumped to.
@@ -2391,72 +2460,7 @@ def _jump_to_dialog():
                 # The search text changed. Find new matching nodes.
 
                 prev_s = s
-
-                try:
-                    # We could use re.IGNORECASE here instead of lower(), but
-                    # this is noticeably less jerky while inputting regexes like
-                    # '.*debug$' (though the '.*' is redundant there). Those
-                    # probably have bad interactions with re.search(), which
-                    # matches anywhere in the string.
-                    #
-                    # It's not horrible either way. Just a bit smoother.
-                    prefix = _kconf.config_prefix.lower()
-                    prefix_len = len(prefix)
-
-                    regex_searches = [
-                        re.compile(
-                            token[prefix_len:] if token.startswith(prefix) else token
-                        ).search
-                        for token in s.lower().split()
-                    ]
-
-                    # No exception thrown, so the regexes are okay
-                    bad_re = None
-
-                    # List of matching nodes
-                    matches = []
-                    add_match = matches.append
-
-                    # Search symbols and choices
-
-                    for node in _sorted_sc_nodes():
-                        # Symbol/choice
-                        sc = node.item
-
-                        for search in regex_searches:
-                            # Both the name and the prompt might be missing,
-                            # since we're searching both symbols and choices
-
-                            # Does the regex match either the symbol name or
-                            # the prompt (if any)?
-                            if not (
-                                sc.name
-                                and search(sc.name.lower())
-                                or node.prompt
-                                and search(node.prompt[0].lower())
-                            ):
-
-                                # Give up on the first regex that doesn't
-                                # match, to speed things up a bit when multiple
-                                # regexes are entered
-                                break
-
-                        else:
-                            add_match(node)
-
-                    # Search menus and comments
-
-                    for node in _sorted_menu_comment_nodes():
-                        for search in regex_searches:
-                            if not search(node.prompt[0].lower()):
-                                break
-                        else:
-                            add_match(node)
-
-                except re.error as e:
-                    # Bad regex. Remember the error message so we can show it.
-                    bad_re = "Bad regular expression: " + e.msg
-                    matches = []
+                matches, bad_re = _jump_to_matches(s)
 
                 # Reset scroll and jump to the top of the list of matches
                 sel_node_i = scroll = 0
@@ -3637,8 +3641,10 @@ def _value_str(node):
 def _is_y_mode_choice_sym(item):
     # The choice mode is an upper bound on the visibility of choice symbols, so
     # we can check the choice symbols' own visibility to see if the choice is
-    # in y mode
-    return isinstance(item, Symbol) and item.choice and item.visibility == 2
+    # in y mode.
+    #
+    # 'is not None' so that a non-choice symbol yields False rather than None
+    return isinstance(item, Symbol) and item.choice is not None and item.visibility == 2
 
 
 def _check_valid(sym, s):
