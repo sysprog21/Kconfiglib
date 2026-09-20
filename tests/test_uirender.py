@@ -29,10 +29,12 @@ def kconf():
 
 @pytest.fixture
 def mc(kconf, monkeypatch):
-    """menuconfig with its module globals set up for rendering."""
-    monkeypatch.setattr(menuconfig, "_kconf", kconf, raising=False)
-    monkeypatch.setattr(menuconfig, "_show_all", True, raising=False)
-    monkeypatch.setattr(menuconfig, "_show_name", False, raising=False)
+    """menuconfig with its interface state set up for rendering."""
+    state = menuconfig._State()
+    state.kconf = kconf
+    state.show_all = True
+    state.show_name = False
+    monkeypatch.setattr(menuconfig, "_s", state)
     return menuconfig
 
 
@@ -145,7 +147,7 @@ def test_menuconfig_node_str_y_mode_choice_shows_selection(mc, kconf):
 
 
 def test_menuconfig_show_name_appends_symbol_name(mc, kconf, monkeypatch):
-    monkeypatch.setattr(mc, "_show_name", True)
+    monkeypatch.setattr(mc._s, "show_name", True)
     assert mc._node_str(node(kconf, "BOOL_SYM")) == "[ ] <BOOL_SYM> A bool (NEW)"
 
 
@@ -248,9 +250,9 @@ def test_changeable_rejects_menus_and_comments(kconf):
 
 def test_shown_nodes_hides_promptless_symbols_until_show_all(mc, kconf, monkeypatch):
     """PROMPTLESS has no prompt, so it appears only in show-all mode."""
-    monkeypatch.setattr(mc, "_show_all", False)
+    monkeypatch.setattr(mc._s, "show_all", False)
     hidden = mc._shown_nodes(kconf.top_node)
-    monkeypatch.setattr(mc, "_show_all", True)
+    monkeypatch.setattr(mc._s, "show_all", True)
     shown = mc._shown_nodes(kconf.top_node)
 
     promptless = node(kconf, "PROMPTLESS")
@@ -261,14 +263,14 @@ def test_shown_nodes_hides_promptless_symbols_until_show_all(mc, kconf, monkeypa
 
 
 def test_shown_nodes_descends_into_a_menuconfig(mc, kconf, monkeypatch):
-    monkeypatch.setattr(mc, "_show_all", False)
+    monkeypatch.setattr(mc._s, "show_all", False)
     children = mc._shown_nodes(node(kconf, "MENUCONFIG_SYM"))
     assert children == [node(kconf, "UNDER_MENUCONFIG")]
 
 
 def test_shown_nodes_of_an_empty_menu_is_empty(mc, kconf, monkeypatch):
     """This is what makes _node_str() draw "----" instead of "--->"."""
-    monkeypatch.setattr(mc, "_show_all", False)
+    monkeypatch.setattr(mc._s, "show_all", False)
     assert mc._shown_nodes(named_menu(kconf, "Empty menu")) == []
     assert mc._shown_nodes(named_menu(kconf, "A menu")) != []
 

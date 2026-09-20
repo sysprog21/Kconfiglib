@@ -105,8 +105,9 @@ def bench_shown_nodes(kconf, repeat):
     """menuconfig._shown_nodes() over every menu -- the TUI's per-redraw walk."""
     import menuconfig
 
-    menuconfig._kconf = kconf
-    menuconfig._show_all = False
+    menuconfig._s = menuconfig._State()
+    menuconfig._s.kconf = kconf
+    menuconfig._s.show_all = False
     return _bench_menu_walk(kconf, repeat, menuconfig._shown_nodes)
 
 
@@ -114,9 +115,10 @@ def bench_node_str(kconf, repeat):
     """menuconfig._node_str() for every node -- one call per visible row."""
     import menuconfig
 
-    menuconfig._kconf = kconf
-    menuconfig._show_all = True
-    menuconfig._show_name = False
+    menuconfig._s = menuconfig._State()
+    menuconfig._s.kconf = kconf
+    menuconfig._s.show_all = True
+    menuconfig._s.show_name = False
 
     nodes = list(kconf.node_iter())
 

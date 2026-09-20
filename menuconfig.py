@@ -463,32 +463,28 @@ def menuconfig(kconf, headless=False):
       processing. In headless mode, the function only loads the configuration
       and returns immediately without user interaction.
     """
-    global _kconf
-    global _conf_filename
-    global _conf_changed
-    global _minconf_filename
-    global _show_all
+    global _s
 
-    _kconf = kconf
-
-    # Clear cached node lists so they rebuild for the new Kconfig instance
-    _cached_sc_nodes.clear()
-    _cached_menu_comment_nodes.clear()
+    # Start from clean state. A second run in the same process would
+    # otherwise inherit the first run's scroll position, dialog state and
+    # show-all mode.
+    _s = _State()
+    _s.kconf = kconf
 
     # Filename to save configuration to
-    _conf_filename = standard_config_filename()
+    _s.conf_filename = standard_config_filename()
 
-    # Load existing configuration and set _conf_changed True if it is outdated
-    _conf_changed = _load_config()
+    # Load existing configuration and set _s.conf_changed True if it is outdated
+    _s.conf_changed = _load_config()
 
     # Filename to save minimal configuration to
-    _minconf_filename = "defconfig"
+    _s.minconf_filename = "defconfig"
 
     # Any visible items in the top menu?
-    _show_all = False
+    _s.show_all = False
     if not _shown_nodes(kconf.top_node):
         # Nothing visible. Start in show-all mode and try again.
-        _show_all = True
+        _s.show_all = True
         if not _shown_nodes(kconf.top_node):
             # Give up. The implementation relies on always having a selected
             # node.
@@ -531,8 +527,8 @@ def _load_config():
     # at all. We prompt for saving the configuration if there are actual changes
     # or if no .config file exists (so user can save the default configuration).
 
-    print(_kconf.load_config())
-    if not os.path.exists(_conf_filename):
+    print(_s.kconf.load_config())
+    if not os.path.exists(_s.conf_filename):
         # No .config exists - treat as changed so user can save defaults
         return True
 
@@ -540,71 +536,122 @@ def _load_config():
 
 
 def _needs_save():
-    return _kconf_needs_save(_kconf)
+    return _kconf_needs_save(_s.kconf)
 
 
-# Global variables used below:
-#
-#   _term:
-#     rawterm.Terminal instance
-#
-#   _cur_menu:
-#     Menu node of the menu (or menuconfig symbol, or choice) currently being
-#     shown
-#
-#   _shown:
-#     List of items in _cur_menu that are shown (ignoring scrolling). In
-#     show-all mode, this list contains all items in _cur_menu. Otherwise, it
-#     contains just the visible items.
-#
-#   _sel_node_i:
-#     Index in _shown of the currently selected node
-#
-#   _menu_scroll:
-#     Index in _shown of the top row of the main display
-#
-#   _parent_screen_rows:
-#     List/stack of the row numbers that the selections in the parent menus
-#     appeared on. This is used to prevent the scrolling from jumping around
-#     when going in and out of menus.
-#
-#   _show_help/_show_name/_show_all:
-#     If True, the corresponding mode is on. See the module docstring.
-#
-#   _conf_filename:
-#     File to save the configuration to
-#
-#   _minconf_filename:
-#     File to save minimal configurations to
-#
-#   _conf_changed:
-#     True if the configuration has been changed. If False, we don't bother
-#     showing the save-and-quit dialog.
-#
-#     We reset this to False whenever the configuration is saved explicitly
-#     from the save dialog.
+class _State:
+    """Everything the interface mutates while it is running.
+
+    One object rather than twenty module globals, so that the drawing and
+    navigation helpers can be driven without a terminal: build a _State, point
+    the module's _s at it, and call the function under test. That is how the
+    row-rendering, search and navigation tests drive this module without a
+    terminal.
+
+    Fields:
+
+      term:
+        rawterm.Terminal instance
+
+      kconf:
+        The Kconfig instance being configured
+
+      cur_menu:
+        Menu node of the menu (or menuconfig symbol, or choice) currently being
+        shown
+
+      shown:
+        List of items in cur_menu that are shown (ignoring scrolling). In
+        show-all mode, this list contains all items in cur_menu. Otherwise, it
+        contains just the visible items.
+
+      sel_node_i:
+        Index in shown of the currently selected node
+
+      menu_scroll:
+        Index in shown of the top row of the main display
+
+      parent_screen_rows:
+        List/stack of the row numbers that the selections in the parent menus
+        appeared on. This is used to prevent the scrolling from jumping around
+        when going in and out of menus.
+
+      show_help/show_name/show_all:
+        If True, the corresponding mode is on. See the module docstring.
+
+      conf_filename:
+        File to save the configuration to
+
+      minconf_filename:
+        File to save minimal configurations to
+
+      conf_changed:
+        True if the configuration has been changed. If False, we don't bother
+        showing the save-and-quit dialog.
+
+        We reset this to False whenever the configuration is saved explicitly
+        from the save dialog.
+
+      screen_win/menu_win/dialog_win/help_win:
+        rawterm regions making up the display
+
+      dlg_bottom_shadow/dlg_right_shadow:
+        Regions painting the drop shadow of the active dialog, or None
+
+      active_button:
+        Index of the selected button in the dialog currently being shown
+    """
+
+    def __init__(self):
+        self.term = None
+        self.kconf = None
+
+        self.cur_menu = None
+        self.shown = []
+        self.sel_node_i = 0
+        self.menu_scroll = 0
+        self.parent_screen_rows = []
+
+        # Search caches, rebuilt on demand by _sorted_sc_nodes() and
+        # _sorted_menu_comment_nodes()
+        self.cached_sc_nodes = []
+        self.cached_menu_comment_nodes = []
+
+        self.show_help = False
+        self.show_name = False
+        self.show_all = False
+
+        self.conf_filename = None
+        self.minconf_filename = None
+        self.conf_changed = False
+
+        self.screen_win = None
+        self.menu_win = None
+        self.dialog_win = None
+        self.help_win = None
+        self.dlg_bottom_shadow = None
+        self.dlg_right_shadow = None
+
+        self.active_button = 0
+
+
+# Rebuilt by menuconfig(), so that a second run in the same process does not
+# inherit the first run's scroll position or dialog state.
+_s = _State()
 
 
 def _menuconfig(term):
     # Logic for the main display, with the list of symbols, etc.
 
-    global _term
-    global _conf_filename
-    global _conf_changed
-    global _minconf_filename
-    global _show_help
-    global _show_name
-    global _active_button
-
-    _term = term
+    _s.term = term
 
     _init()
 
     while True:
         _draw_main()
-        _term.update()
+        _s.term.update()
 
-        c = _term.read_key()
+        c = _s.term.read_key()
 
         if c == Key.RESIZE:
             _resize_main()
@@ -638,42 +685,42 @@ def _menuconfig(term):
         #
 
         elif c in ("\t", Key.RIGHT):
-            _active_button = (_active_button + 1) % len(_MENU_BUTTONS)
+            _s.active_button = (_s.active_button + 1) % len(_MENU_BUTTONS)
 
         elif c == Key.LEFT:
-            _active_button = (_active_button - 1) % len(_MENU_BUTTONS)
+            _s.active_button = (_s.active_button - 1) % len(_MENU_BUTTONS)
 
         #
         # Enter activates the currently focused button (matching mconf)
         #
 
         elif c == "\n":
-            if _active_button == 0:  # Select
-                sel_node = _shown[_sel_node_i]
+            if _s.active_button == 0:  # Select
+                sel_node = _s.shown[_s.sel_node_i]
                 if not _enter_menu(sel_node):
                     _change_node(sel_node)
 
-            elif _active_button == 1:  # Exit
-                if _cur_menu is _kconf.top_node:
+            elif _s.active_button == 1:  # Exit
+                if _s.cur_menu is _s.kconf.top_node:
                     res = _quit_dialog()
                     if res:
                         return res
                 else:
                     _leave_menu()
 
-            elif _active_button == 2:  # Help
-                _info_dialog(_shown[_sel_node_i], False)
+            elif _s.active_button == 2:  # Help
+                _info_dialog(_s.shown[_s.sel_node_i], False)
                 _resize_main()
 
-            elif _active_button == 3:  # Save
+            elif _s.active_button == 3:  # Save
                 filename = _save_dialog(
-                    _kconf.write_config, _conf_filename, "configuration"
+                    _s.kconf.write_config, _s.conf_filename, "configuration"
                 )
                 if filename:
-                    _conf_filename = filename
-                    _conf_changed = False
+                    _s.conf_filename = filename
+                    _s.conf_changed = False
 
-            elif _active_button == 4:  # Load
+            elif _s.active_button == 4:  # Load
                 _load_dialog()
 
         #
@@ -682,7 +729,7 @@ def _menuconfig(term):
 
         elif c == " ":
             # Toggle the node if possible
-            sel_node = _shown[_sel_node_i]
+            sel_node = _s.shown[_s.sel_node_i]
             if not _change_node(sel_node):
                 _enter_menu(sel_node)
 
@@ -699,7 +746,7 @@ def _menuconfig(term):
         elif c in (Key.BACKSPACE, "\x1b", "e", "x", "E", "X"):
             # Leave menu (ESC/Backspace/E/X). At top level, ESC/E/X show
             # quit dialog; Backspace always just leaves.
-            if c != Key.BACKSPACE and _cur_menu is _kconf.top_node:
+            if c != Key.BACKSPACE and _s.cur_menu is _s.kconf.top_node:
                 res = _quit_dialog()
                 if res:
                     return res
@@ -711,15 +758,15 @@ def _menuconfig(term):
             _resize_main()
 
         elif c in ("?", "h", "H"):
-            _info_dialog(_shown[_sel_node_i], False)
+            _info_dialog(_s.shown[_s.sel_node_i], False)
             _resize_main()
 
         elif c in ("f", "F"):
-            _show_help = not _show_help
+            _s.show_help = not _s.show_help
             _resize_main()
 
         elif c in ("c", "C"):
-            _show_name = not _show_name
+            _s.show_name = not _s.show_name
 
         elif c in ("a", "A", "z", "Z"):
             _toggle_show_all()
@@ -731,10 +778,10 @@ def _menuconfig(term):
 
 
 def _quit_dialog():
-    config_exists = os.path.exists(_conf_filename)
+    config_exists = os.path.exists(_s.conf_filename)
 
-    if not _conf_changed and config_exists:
-        return f"No changes to save (for '{_conf_filename}')"
+    if not _s.conf_changed and config_exists:
+        return f"No changes to save (for '{_s.conf_filename}')"
 
     # Match C mconf's handle_exit() -- dialog_yesno with 2 buttons
     dialog_text = (
@@ -754,7 +801,7 @@ def _quit_dialog():
 
     if result == 0:  # Yes
         # Returns a message to print
-        msg = _try_save(_kconf.write_config, _conf_filename, "configuration")
+        msg = _try_save(_s.kconf.write_config, _s.conf_filename, "configuration")
         if msg:
             return msg
         # If save failed, try again
@@ -763,7 +810,7 @@ def _quit_dialog():
     elif result == 1:  # No
         if not config_exists:
             return "Configuration was not saved"
-        return f"Configuration ({_conf_filename}) was not saved"
+        return f"Configuration ({_s.conf_filename}) was not saved"
 
 
 def _init():
@@ -772,69 +819,52 @@ def _init():
     # the terminal.
     #
     # The layout matches mconf/lxdialog's dialog_menu():
-    #   _screen_win  - full screen background (cyan/blue)
-    #   _dialog_win  - centered dialog body (white, with border/title/
-    #                  instructions/inner menu box/separator/buttons)
-    #   _menu_win    - inner menu item area (positioned inside the dialog)
-    #   _help_win    - help text (show-help mode only)
+    #   _s.screen_win - full screen background (cyan/blue)
+    #   _s.dialog_win - centered dialog body (white, with border/title/
+    #                   instructions/inner menu box/separator/buttons)
+    #   _s.menu_win   - inner menu item area (positioned inside the dialog)
+    #   _s.help_win   - help text (show-help mode only)
     #
     # Shadow regions for the dialog are created in _resize_main().
-
-    global _screen_win
-    global _dialog_win
-    global _menu_win
-    global _help_win
-    global _dlg_bottom_shadow
-    global _dlg_right_shadow
-    global _active_button
-
-    global _parent_screen_rows
-    global _cur_menu
-    global _shown
-    global _sel_node_i
-    global _menu_scroll
-
-    global _show_help
-    global _show_name
 
     _init_styles()
 
     # Hide the cursor
-    _term.hide_cursor()
+    _s.term.hide_cursor()
 
     # Initialize regions -- creation order determines compositing order
     # (painter's algorithm: later regions paint on top of earlier ones)
 
     # Full-screen background (lowest layer)
-    _screen_win = _styled_region("screen")
+    _s.screen_win = _styled_region("screen")
 
     # The main dialog body (above screen background)
-    _dialog_win = _styled_region("body")
+    _s.dialog_win = _styled_region("body")
 
     # Inner menu item area (above dialog body)
-    _menu_win = _styled_region("list")
+    _s.menu_win = _styled_region("list")
 
     # Help text window for show-help mode (above dialog, initially hidden)
-    _help_win = _styled_region("show-help")
+    _s.help_win = _styled_region("show-help")
 
     # Shadow regions -- created in _resize_main()
-    _dlg_bottom_shadow = None
-    _dlg_right_shadow = None
+    _s.dlg_bottom_shadow = None
+    _s.dlg_right_shadow = None
 
     # Currently focused button (0=Select, 1=Exit, 2=Help, 3=Save, 4=Load)
-    _active_button = 0
+    _s.active_button = 0
 
     # The rows we'd like the nodes in the parent menus to appear on. This
     # prevents the scroll from jumping around when going in and out of menus.
-    _parent_screen_rows = []
+    _s.parent_screen_rows = []
 
     # Initial state
 
-    _cur_menu = _kconf.top_node
-    _shown = _shown_nodes(_cur_menu)
-    _sel_node_i = _menu_scroll = 0
+    _s.cur_menu = _s.kconf.top_node
+    _s.shown = _shown_nodes(_s.cur_menu)
+    _s.sel_node_i = _s.menu_scroll = 0
 
-    _show_help = _show_name = False
+    _s.show_help = _s.show_name = False
 
     # Give regions their initial size
     _resize_main()
@@ -857,14 +887,10 @@ def _resize_main():
     #     Row dlg_h-3:      separator (LTEE + HLINE + RTEE)
     #     Row dlg_h-2:      buttons
     #     Row dlg_h-1:      bottom border
-    #   Menu items region (_menu_win) overlaid inside the inner box
+    #   Menu items region (_s.menu_win) overlaid inside the inner box
 
-    global _menu_scroll
-    global _dlg_bottom_shadow
-    global _dlg_right_shadow
-
-    screen_height = _term.height
-    screen_width = _term.width
+    screen_height = _s.term.height
+    screen_width = _s.term.width
 
     # Dialog dimensions -- matching mconf/lxdialog/menubox.c dialog_menu()
     dlg_height = screen_height - 4
@@ -883,7 +909,7 @@ def _resize_main():
 
     # In show-help mode, steal rows from the menu area for help text
     help_in_dialog = 0
-    if _show_help:
+    if _s.show_help:
         help_in_dialog = min(_SHOW_HELP_HEIGHT, max(menu_height - 2, 0))
         menu_height = max(menu_height - help_in_dialog, 1)
 
@@ -901,38 +927,38 @@ def _resize_main():
     # --- Resize and position regions ---
 
     # Screen background
-    _screen_win.resize(screen_height, screen_width)
-    _screen_win.move(0, 0)
-    _screen_win.fill(_style["screen"])
+    _s.screen_win.resize(screen_height, screen_width)
+    _s.screen_win.move(0, 0)
+    _s.screen_win.fill(_style["screen"])
 
     # Dialog body
-    _dialog_win.resize(dlg_height, dlg_width)
-    _dialog_win.move(dlg_y, dlg_x)
-    _dialog_win.fill(_style["body"])
+    _s.dialog_win.resize(dlg_height, dlg_width)
+    _s.dialog_win.move(dlg_y, dlg_x)
+    _s.dialog_win.fill(_style["body"])
 
     # Menu items (positioned inside the inner menu box of the dialog)
-    _menu_win.resize(menu_height, menu_width)
-    _menu_win.move(dlg_y + box_y + 1, dlg_x + box_x + 1)
-    _menu_win.fill(_style["list"])
+    _s.menu_win.resize(menu_height, menu_width)
+    _s.menu_win.move(dlg_y + box_y + 1, dlg_x + box_x + 1)
+    _s.menu_win.fill(_style["list"])
 
     # Help window -- positioned below inner menu box in show-help mode,
     # or moved off-screen when not needed
-    if _show_help and help_in_dialog > 0:
+    if _s.show_help and help_in_dialog > 0:
         help_y = dlg_y + box_y + menu_height + 2
-        _help_win.resize(help_in_dialog, menu_width)
-        _help_win.move(help_y, dlg_x + box_x + 1)
-        _help_win.fill(_style["show-help"])
+        _s.help_win.resize(help_in_dialog, menu_width)
+        _s.help_win.move(help_y, dlg_x + box_x + 1)
+        _s.help_win.fill(_style["show-help"])
     else:
-        _help_win.resize(1, 1)
-        _help_win.move(screen_height, 0)  # off-screen
+        _s.help_win.resize(1, 1)
+        _s.help_win.move(screen_height, 0)  # off-screen
 
     # Shadow regions for the dialog
-    _close_shadow_windows(_dlg_bottom_shadow, _dlg_right_shadow)
-    _dlg_bottom_shadow, _dlg_right_shadow = _create_shadow_for_win(_dialog_win)
+    _close_shadow_windows(_s.dlg_bottom_shadow, _s.dlg_right_shadow)
+    _s.dlg_bottom_shadow, _s.dlg_right_shadow = _create_shadow_for_win(_s.dialog_win)
 
     # Adjust the scroll so that the selected node is still within the window
-    if _sel_node_i - _menu_scroll >= menu_height:
-        _menu_scroll = _sel_node_i - menu_height + 1
+    if _s.sel_node_i - _s.menu_scroll >= menu_height:
+        _s.menu_scroll = _s.sel_node_i - menu_height + 1
 
 
 def _height(win):
@@ -950,11 +976,6 @@ def _enter_menu(menu):
     #
     # Returns False if 'menu' can't be entered.
 
-    global _cur_menu
-    global _shown
-    global _sel_node_i
-    global _menu_scroll
-
     if not menu.is_menuconfig:
         return False  # Not a menu
 
@@ -965,12 +986,12 @@ def _enter_menu(menu):
 
     # Remember where the current node appears on the screen, so we can try
     # to get it to appear in the same place when we leave the menu
-    _parent_screen_rows.append(_sel_node_i - _menu_scroll)
+    _s.parent_screen_rows.append(_s.sel_node_i - _s.menu_scroll)
 
     # Jump into menu
-    _cur_menu = menu
-    _shown = shown_sub
-    _sel_node_i = _menu_scroll = 0
+    _s.cur_menu = menu
+    _s.shown = shown_sub
+    _s.sel_node_i = _s.menu_scroll = 0
 
     if isinstance(menu.item, Choice):
         _select_selected_choice_sym()
@@ -983,15 +1004,13 @@ def _select_selected_choice_sym():
     # any. Does nothing if if the choice has no selection (is not visible/in y
     # mode).
 
-    global _sel_node_i
-
-    choice = _cur_menu.item
+    choice = _s.cur_menu.item
     if choice.selection:
         # Search through all menu nodes to handle choice symbols being defined
         # in multiple locations
         for node in choice.selection.nodes:
-            if node in _shown:
-                _sel_node_i = _shown.index(node)
+            if node in _s.shown:
+                _s.sel_node_i = _s.shown.index(node)
                 _center_vertically()
                 return
 
@@ -999,37 +1018,30 @@ def _select_selected_choice_sym():
 def _jump_to(node):
     # Jumps directly to the menu node 'node'
 
-    global _cur_menu
-    global _shown
-    global _sel_node_i
-    global _menu_scroll
-    global _show_all
-    global _parent_screen_rows
-
     # Clear remembered menu locations. We might not even have been in the
     # parent menus before.
-    _parent_screen_rows = []
+    _s.parent_screen_rows = []
 
-    old_show_all = _show_all
+    old_show_all = _s.show_all
     jump_into = (isinstance(node.item, Choice) or node.item == MENU) and node.list
 
     # If we're jumping to a non-empty choice or menu, jump to the first entry
     # in it instead of jumping to its menu node
     if jump_into:
-        _cur_menu = node
+        _s.cur_menu = node
         node = node.list
     else:
-        _cur_menu = uicommon.parent_menu(node)
+        _s.cur_menu = uicommon.parent_menu(node)
 
-    _shown = _shown_nodes(_cur_menu)
-    if node not in _shown:
+    _s.shown = _shown_nodes(_s.cur_menu)
+    if node not in _s.shown:
         # The node wouldn't be shown. Turn on show-all to show it.
-        _show_all = True
-        _shown = _shown_nodes(_cur_menu)
+        _s.show_all = True
+        _s.shown = _shown_nodes(_s.cur_menu)
 
-    _sel_node_i = _shown.index(node)
+    _s.sel_node_i = _s.shown.index(node)
 
-    if jump_into and not old_show_all and _show_all:
+    if jump_into and not old_show_all and _s.show_all:
         # If we're jumping into a choice or menu and were forced to turn on
         # show-all because the first entry wasn't visible, try turning it off.
         # That will land us at the first visible node if there are visible
@@ -1040,7 +1052,7 @@ def _jump_to(node):
 
     # If we're jumping to a non-empty choice, jump to the selected symbol, if
     # any
-    if jump_into and isinstance(_cur_menu.item, Choice):
+    if jump_into and isinstance(_s.cur_menu.item, Choice):
         _select_selected_choice_sym()
 
 
@@ -1048,34 +1060,29 @@ def _leave_menu():
     # Jumps to the parent menu of the current menu. Does nothing if we're in
     # the top menu.
 
-    global _cur_menu
-    global _shown
-    global _sel_node_i
-    global _menu_scroll
-
-    if _cur_menu is _kconf.top_node:
+    if _s.cur_menu is _s.kconf.top_node:
         return
 
     # Jump to parent menu
-    parent = uicommon.parent_menu(_cur_menu)
-    _shown = _shown_nodes(parent)
+    parent = uicommon.parent_menu(_s.cur_menu)
+    _s.shown = _shown_nodes(parent)
 
     try:
-        _sel_node_i = _shown.index(_cur_menu)
+        _s.sel_node_i = _s.shown.index(_s.cur_menu)
     except ValueError:
         # The parent actually does not contain the current menu (e.g., symbol
         # search). So we jump to the first node instead.
-        _sel_node_i = 0
+        _s.sel_node_i = 0
 
-    _cur_menu = parent
+    _s.cur_menu = parent
 
     # Try to make the menu entry appear on the same row on the screen as it did
     # before we entered the menu.
 
-    if _parent_screen_rows:
+    if _s.parent_screen_rows:
         # The terminal might have shrunk since we were last in the parent menu
-        screen_row = min(_parent_screen_rows.pop(), _height(_menu_win) - 1)
-        _menu_scroll = max(_sel_node_i - screen_row, 0)
+        screen_row = min(_s.parent_screen_rows.pop(), _height(_s.menu_win) - 1)
+        _s.menu_scroll = max(_s.sel_node_i - screen_row, 0)
     else:
         # No saved parent menu locations, meaning we jumped directly to some
         # node earlier
@@ -1086,113 +1093,95 @@ def _select_next_menu_entry():
     # Selects the menu entry after the current one, adjusting the scroll if
     # necessary. Does nothing if we're already at the last menu entry.
 
-    global _sel_node_i
-    global _menu_scroll
-
-    if _sel_node_i < len(_shown) - 1:
+    if _s.sel_node_i < len(_s.shown) - 1:
         # Jump to the next node
-        _sel_node_i += 1
+        _s.sel_node_i += 1
 
         # If the new node is sufficiently close to the edge of the menu window
         # (as determined by _SCROLL_OFFSET), increase the scroll by one. This
         # gives nice and non-jumpy behavior even when
-        # _SCROLL_OFFSET >= _height(_menu_win).
-        if _sel_node_i >= _menu_scroll + _height(
-            _menu_win
-        ) - _SCROLL_OFFSET and _menu_scroll < _max_scroll(_shown, _menu_win):
-
-            _menu_scroll += 1
+        # _SCROLL_OFFSET >= _height(_s.menu_win).
+        last_visible = _s.menu_scroll + _height(_s.menu_win) - _SCROLL_OFFSET
+        if _s.sel_node_i >= last_visible and _s.menu_scroll < _max_scroll(
+            _s.shown, _s.menu_win
+        ):
+            _s.menu_scroll += 1
 
 
 def _select_prev_menu_entry():
     # Selects the menu entry before the current one, adjusting the scroll if
     # necessary. Does nothing if we're already at the first menu entry.
 
-    global _sel_node_i
-    global _menu_scroll
-
-    if _sel_node_i > 0:
+    if _s.sel_node_i > 0:
         # Jump to the previous node
-        _sel_node_i -= 1
+        _s.sel_node_i -= 1
 
         # See _select_next_menu_entry()
-        if _sel_node_i < _menu_scroll + _SCROLL_OFFSET:
-            _menu_scroll = max(_menu_scroll - 1, 0)
+        if _s.sel_node_i < _s.menu_scroll + _SCROLL_OFFSET:
+            _s.menu_scroll = max(_s.menu_scroll - 1, 0)
 
 
 def _select_last_menu_entry():
     # Selects the last menu entry in the current menu
 
-    global _sel_node_i
-    global _menu_scroll
-
-    _sel_node_i = len(_shown) - 1
-    _menu_scroll = _max_scroll(_shown, _menu_win)
+    _s.sel_node_i = len(_s.shown) - 1
+    _s.menu_scroll = _max_scroll(_s.shown, _s.menu_win)
 
 
 def _select_first_menu_entry():
     # Selects the first menu entry in the current menu
 
-    global _sel_node_i
-    global _menu_scroll
-
-    _sel_node_i = _menu_scroll = 0
+    _s.sel_node_i = _s.menu_scroll = 0
 
 
 def _toggle_show_all():
     # Toggles show-all mode on/off. If turning it off would give no visible
     # items in the current menu, it is left on.
 
-    global _show_all
-    global _shown
-    global _sel_node_i
-    global _menu_scroll
-
     # Row on the screen the cursor is on. Preferably we want the same row to
     # stay highlighted.
-    old_row = _sel_node_i - _menu_scroll
+    old_row = _s.sel_node_i - _s.menu_scroll
 
-    _show_all = not _show_all
-    # List of new nodes to be shown after toggling _show_all
-    new_shown = _shown_nodes(_cur_menu)
+    _s.show_all = not _s.show_all
+    # List of new nodes to be shown after toggling _s.show_all
+    new_shown = _shown_nodes(_s.cur_menu)
 
     # Find a good node to select. The selected node might disappear if show-all
     # mode is turned off.
 
     # Select the previously selected node itself if it is still visible. If
     # there are visible nodes before it, select the closest one.
-    for node in _shown[_sel_node_i::-1]:
+    for node in _s.shown[_s.sel_node_i :: -1]:
         if node in new_shown:
-            _sel_node_i = new_shown.index(node)
+            _s.sel_node_i = new_shown.index(node)
             break
     else:
         # No visible nodes before the previously selected node. Select the
         # closest visible node after it instead.
-        for node in _shown[_sel_node_i + 1 :]:
+        for node in _s.shown[_s.sel_node_i + 1 :]:
             if node in new_shown:
-                _sel_node_i = new_shown.index(node)
+                _s.sel_node_i = new_shown.index(node)
                 break
         else:
             # No visible nodes at all, meaning show-all was turned off inside
             # an invisible menu. Don't allow that, as the implementation relies
             # on always having a selected node.
-            _show_all = True
+            _s.show_all = True
             return
 
-    _shown = new_shown
+    _s.shown = new_shown
 
     # Try to make the cursor stay on the same row in the menu window. This
     # might be impossible if too many nodes have disappeared above the node.
-    _menu_scroll = max(_sel_node_i - old_row, 0)
+    _s.menu_scroll = max(_s.sel_node_i - old_row, 0)
 
 
 def _center_vertically():
     # Centers the selected node vertically, if possible
 
-    global _menu_scroll
-
-    _menu_scroll = min(
-        max(_sel_node_i - _height(_menu_win) // 2, 0), _max_scroll(_shown, _menu_win)
+    _s.menu_scroll = min(
+        max(_s.sel_node_i - _height(_s.menu_win) // 2, 0),
+        _max_scroll(_s.shown, _s.menu_win),
     )
 
 
@@ -1201,20 +1190,20 @@ def _draw_main():
     # centered dialog with title/instructions/inner menu box/buttons, and
     # shadow.
 
-    screen_width = _term.width
-    dlg_h = _height(_dialog_win)
-    dlg_w = _width(_dialog_win)
+    screen_width = _s.term.width
+    dlg_h = _height(_s.dialog_win)
+    dlg_w = _width(_s.dialog_win)
 
-    menu_height = _height(_menu_win)
-    menu_width = _width(_menu_win)
+    menu_height = _height(_s.menu_win)
+    menu_width = _width(_s.menu_win)
 
     # --- Compute inner box position within the dialog ---
     # These must match _resize_main() calculations.
     help_in_dialog = 0
-    if _show_help:
+    if _s.show_help:
         help_in_dialog = min(_SHOW_HELP_HEIGHT, max(dlg_h - 10 - 2, 0))
         # Recalculate menu_height for positioning only (actual size is from
-        # the _menu_win region).
+        # the _s.menu_win region).
     box_y = dlg_h - menu_height - 5 - help_in_dialog
     box_x = (dlg_w - menu_width) // 2 - 1
     box_y = max(box_y, 1)
@@ -1228,17 +1217,17 @@ def _draw_main():
     # ---------------------------------------------------------------
     # 1. Screen background
     # ---------------------------------------------------------------
-    _screen_win.clear()
+    _s.screen_win.clear()
 
     screen_style = _style["screen"]
 
     # Backtitle at row 0 (like mconf's dialog_clear() + backtitle)
-    _screen_win.write(0, 1, _kconf.mainmenu_text, screen_style)
+    _s.screen_win.write(0, 1, _s.kconf.mainmenu_text, screen_style)
 
     # Subtitle path at row 1 (like mconf's subtitle trail)
     subtitle_parts = []
-    menu = _cur_menu
-    while menu is not _kconf.top_node:
+    menu = _s.cur_menu
+    while menu is not _s.kconf.top_node:
         subtitle_parts.append(
             menu.prompt[0] if menu.prompt else standard_sc_expr_str(menu.item)
         )
@@ -1249,26 +1238,26 @@ def _draw_main():
         path_str = ""
         for part in subtitle_parts:
             path_str += Box.RARROW + " " + part + " "
-        _screen_win.write(1, 1, path_str[: screen_width - 2], screen_style)
+        _s.screen_win.write(1, 1, path_str[: screen_width - 2], screen_style)
         hline_start = min(1 + len(path_str), screen_width - 1)
     else:
         hline_start = 1
 
     # Fill rest of row 1 with horizontal line
     for j in range(hline_start, screen_width - 1):
-        _screen_win.write_char(1, j, Box.HLINE, screen_style)
+        _s.screen_win.write_char(1, j, Box.HLINE, screen_style)
 
     # Mode indicators on screen background (show-name/show-all/show-help)
     enabled_modes = []
-    if _show_help:
+    if _s.show_help:
         enabled_modes.append("show-help")
-    if _show_name:
+    if _s.show_name:
         enabled_modes.append("show-name")
-    if _show_all:
+    if _s.show_all:
         enabled_modes.append("show-all")
     if enabled_modes:
         mode_str = "[" + "+".join(enabled_modes) + "]"
-        _screen_win.write(
+        _s.screen_win.write(
             0,
             max(screen_width - len(mode_str) - 1, 0),
             mode_str,
@@ -1278,21 +1267,21 @@ def _draw_main():
     # ---------------------------------------------------------------
     # 2. Dialog body
     # ---------------------------------------------------------------
-    _dialog_win.clear()
+    _s.dialog_win.clear()
 
     body_style = _style["body"]
     border_style = _style.get("border", _style["frame"])
 
     # Outer dialog box: body for interior, frame for border
     # Matches mconf: draw_box(dialog, 0, 0, h, w, dlg.dialog.atr, dlg.border.atr)
-    _draw_box(_dialog_win, 0, 0, dlg_h, dlg_w, body_style, border_style)
+    _draw_box(_s.dialog_win, 0, 0, dlg_h, dlg_w, body_style, border_style)
 
     # Separator between menu area and buttons
-    _draw_separator(_dialog_win, dlg_h - 3, dlg_w)
+    _draw_separator(_s.dialog_win, dlg_h - 3, dlg_w)
 
     # Title centered in top border (like mconf's print_title())
-    title = _cur_menu.prompt[0] if _cur_menu.prompt else _kconf.mainmenu_text
-    _draw_title(_dialog_win, title, dlg_w)
+    title = _s.cur_menu.prompt[0] if _s.cur_menu.prompt else _s.kconf.mainmenu_text
+    _draw_title(_s.dialog_win, title, dlg_w)
 
     # Instruction text (autowrapped, like mconf's print_autowrap())
     # mconf: print_autowrap(dialog, prompt, width - 2, 1, 3)
@@ -1305,21 +1294,21 @@ def _draw_main():
             # Entire text fits -- center it (like mconf's
             # print_text_centered)
             cx = (dlg_w - len(_MENU_INSTRUCTIONS)) // 2
-            _dialog_win.write(1, cx, _MENU_INSTRUCTIONS, body_style)
+            _s.dialog_win.write(1, cx, _MENU_INSTRUCTIONS, body_style)
         else:
             inst_lines = textwrap.wrap(_MENU_INSTRUCTIONS, inst_width)
             for idx, line in enumerate(inst_lines):
                 row = 1 + idx
                 if row >= box_y:
                     break
-                _dialog_win.write(row, inst_x, line, body_style)
+                _s.dialog_win.write(row, inst_x, line, body_style)
 
     # Inner menu box: box_style=menubox-border, border_style=menubox
     # (matching mconf's draw_box for the menu area)
     inner_box_style = _style.get("menubox-border", _style["frame"])
     inner_border_style = _style.get("menubox", _style["list"])
     _draw_box(
-        _dialog_win,
+        _s.dialog_win,
         box_y,
         box_x,
         menu_height + 2,
@@ -1330,9 +1319,9 @@ def _draw_main():
 
     # Scroll arrows (like mconf's print_arrows())
     _draw_scroll_arrows(
-        _dialog_win,
-        len(_shown),
-        _menu_scroll,
+        _s.dialog_win,
+        len(_s.shown),
+        _s.menu_scroll,
         box_y,
         box_x + item_x + 1,
         menu_height,
@@ -1341,47 +1330,47 @@ def _draw_main():
     )
 
     # Buttons (like mconf's print_buttons())
-    _draw_main_buttons(_dialog_win, dlg_h, dlg_w)
+    _draw_main_buttons(_s.dialog_win, dlg_h, dlg_w)
 
     # ---------------------------------------------------------------
-    # 3. Menu items (drawn into _menu_win, positioned inside inner box)
+    # 3. Menu items (drawn into _s.menu_win, positioned inside inner box)
     # ---------------------------------------------------------------
-    _menu_win.clear()
+    _s.menu_win.clear()
 
     text_width = menu_width - item_x
-    for i in range(_menu_scroll, min(_menu_scroll + menu_height, len(_shown))):
-        node = _shown[i]
+    for i in range(_s.menu_scroll, min(_s.menu_scroll + menu_height, len(_s.shown))):
+        node = _s.shown[i]
 
-        if uicommon.visible(node) or not _show_all:
-            style = _style["selection" if i == _sel_node_i else "list"]
+        if uicommon.visible(node) or not _s.show_all:
+            style = _style["selection" if i == _s.sel_node_i else "list"]
         else:
-            style = _style["inv-selection" if i == _sel_node_i else "inv-list"]
+            style = _style["inv-selection" if i == _s.sel_node_i else "inv-list"]
 
         # Clear entire row with list style, then draw text
-        _menu_win.write(i - _menu_scroll, 0, " " * menu_width, _style["list"])
+        _s.menu_win.write(i - _s.menu_scroll, 0, " " * menu_width, _style["list"])
 
         node_text = _node_str(node)
         node_text = node_text[:text_width].ljust(text_width)
-        _menu_win.write(i - _menu_scroll, item_x, node_text, style)
+        _s.menu_win.write(i - _s.menu_scroll, item_x, node_text, style)
 
     # ---------------------------------------------------------------
     # 4. Help text (show-help mode only)
     # ---------------------------------------------------------------
-    if _show_help and _help_win.height > 1:
-        _help_win.clear()
-        node = _shown[_sel_node_i]
+    if _s.show_help and _s.help_win.height > 1:
+        _s.help_win.clear()
+        node = _s.shown[_s.sel_node_i]
         sh_style = _style["show-help"]
         if isinstance(node.item, (Symbol, Choice)) and node.help:
-            help_lines = textwrap.wrap(node.help, _width(_help_win))
-            for i in range(min(_height(_help_win), len(help_lines))):
-                _help_win.write(i, 0, help_lines[i], sh_style)
+            help_lines = textwrap.wrap(node.help, _width(_s.help_win))
+            for i in range(min(_height(_s.help_win), len(help_lines))):
+                _s.help_win.write(i, 0, help_lines[i], sh_style)
         else:
-            _help_win.write(0, 0, "(no help)", sh_style)
+            _s.help_win.write(0, 0, "(no help)", sh_style)
 
     # ---------------------------------------------------------------
     # 5. Shadow
     # ---------------------------------------------------------------
-    _refresh_shadow_windows(_dlg_bottom_shadow, _dlg_right_shadow)
+    _refresh_shadow_windows(_s.dlg_bottom_shadow, _s.dlg_right_shadow)
 
 
 def _draw_scroll_arrows(
@@ -1430,7 +1419,7 @@ def _draw_main_buttons(win, dlg_h, dlg_w):
         bx = start_x + i * 12
         if bx + len(label) + 2 > dlg_w:
             break
-        _print_button(win, label, button_y, bx, i == _active_button)
+        _print_button(win, label, button_y, bx, i == _s.active_button)
 
 
 def _shown_nodes(menu):
@@ -1441,7 +1430,7 @@ def _shown_nodes(menu):
         res = []
 
         while node:
-            if uicommon.visible(node) or _show_all:
+            if uicommon.visible(node) or _s.show_all:
                 res.append(node)
                 if node.list and not node.is_menuconfig:
                     # Nodes from implicit menu created from dependencies. Will
@@ -1568,16 +1557,14 @@ def _set_sel_node_tri_val(tri_val):
     # Sets the value of the currently selected menu entry to 'tri_val', if that
     # value can be assigned
 
-    sc = _shown[_sel_node_i].item
+    sc = _s.shown[_s.sel_node_i].item
     if isinstance(sc, (Symbol, Choice)) and tri_val in sc.assignable:
         _set_val(sc, tri_val)
 
 
 def _set_val(sc, val):
     # Wrapper around Symbol/Choice.set_value() for updating the menu state and
-    # _conf_changed
-
-    global _conf_changed
+    # _s.conf_changed
 
     # Use the string representation of tristate values. This makes the format
     # consistent for all symbol types.
@@ -1586,7 +1573,7 @@ def _set_val(sc, val):
 
     if val != sc.str_value:
         sc.set_value(val)
-        _conf_changed = True
+        _s.conf_changed = True
 
         # Changing the value of the symbol might have changed what items in the
         # current menu are visible. Recalculate the state.
@@ -1601,24 +1588,20 @@ def _update_menu():
     # If possible, preserves the location of the cursor on the screen when
     # items are added/removed above the selected item.
 
-    global _shown
-    global _sel_node_i
-    global _menu_scroll
-
     # Row on the screen the cursor was on
-    old_row = _sel_node_i - _menu_scroll
+    old_row = _s.sel_node_i - _s.menu_scroll
 
-    sel_node = _shown[_sel_node_i]
+    sel_node = _s.shown[_s.sel_node_i]
 
     # New visible nodes
-    _shown = _shown_nodes(_cur_menu)
+    _s.shown = _shown_nodes(_s.cur_menu)
 
     # New index of selected node
-    _sel_node_i = _shown.index(sel_node)
+    _s.sel_node_i = _s.shown.index(sel_node)
 
     # Try to make the cursor stay on the same row in the menu window. This
     # might be impossible if too many nodes have disappeared above the node.
-    _menu_scroll = max(_sel_node_i - old_row, 0)
+    _s.menu_scroll = max(_s.sel_node_i - old_row, 0)
 
 
 def _input_dialog(title, initial_text, info_text=None):
@@ -1645,7 +1628,7 @@ def _input_dialog(title, initial_text, info_text=None):
         # Give the input dialog its initial size
         _resize_input_dialog(win, title, info_lines)
 
-        _term.show_cursor(very_visible=True)
+        _s.term.show_cursor(very_visible=True)
 
         # Input field text
         s = initial_text
@@ -1670,9 +1653,9 @@ def _input_dialog(title, initial_text, info_text=None):
 
             _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-            _term.update()
+            _s.term.update()
 
-            c = _term.read_key()
+            c = _s.term.read_key()
 
             if c == Key.RESIZE:
                 _resize_main()
@@ -1681,11 +1664,11 @@ def _input_dialog(title, initial_text, info_text=None):
                 bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
             elif c == "\n":
-                _term.hide_cursor()
+                _s.term.hide_cursor()
                 return s
 
             elif c == "\x1b":  # ESC
-                _term.hide_cursor()
+                _s.term.hide_cursor()
                 return None
 
             elif c == "\0":  # NUL, ignore
@@ -1702,7 +1685,7 @@ def _input_dialog(title, initial_text, info_text=None):
 def _resize_input_dialog(win, title, info_lines):
     # Resizes the input dialog to a size appropriate for the terminal size
 
-    screen_height, screen_width = _term.height, _term.width
+    screen_height, screen_width = _s.term.height, _s.term.width
 
     win_height = 5
     if info_lines:
@@ -1739,17 +1722,13 @@ def _draw_input_dialog(win, title, info_lines, s, i, hscroll):
         # Truncate then pad to interior width so body_style covers frame bg
         win.write(4 + linenr, 2, line[:edit_width].ljust(edit_width), _style["body"])
 
-    _term.set_cursor(win, 2, 2 + i - hscroll)
+    _s.term.set_cursor(win, 2, 2 + i - hscroll)
 
 
 def _load_dialog():
     # Dialog for loading a new configuration
 
-    global _conf_changed
-    global _conf_filename
-    global _show_all
-
-    if _conf_changed:
+    if _s.conf_changed:
         c = _key_dialog(
             "Load",
             "You have unsaved changes. Load new\n"
@@ -1762,7 +1741,7 @@ def _load_dialog():
         if c is None or c == "c":
             return
 
-    filename = _conf_filename
+    filename = _s.conf_filename
     while True:
         filename = _input_dialog("File to load", filename, _load_save_info())
         if filename is None:
@@ -1771,13 +1750,13 @@ def _load_dialog():
         filename = os.path.expanduser(filename)
 
         if _try_load(filename):
-            _conf_filename = filename
-            _conf_changed = _needs_save()
+            _s.conf_filename = filename
+            _s.conf_changed = _needs_save()
 
             # Turn on show-all mode if the selected node is not visible after
-            # loading the new configuration. _shown still holds the old state.
-            if _shown[_sel_node_i] not in _shown_nodes(_cur_menu):
-                _show_all = True
+            # loading the new configuration. _s.shown still holds the old state.
+            if _s.shown[_s.sel_node_i] not in _shown_nodes(_s.cur_menu):
+                _s.show_all = True
 
             _update_menu()
 
@@ -1795,7 +1774,7 @@ def _try_load(filename):
     #   Configuration file to load
 
     try:
-        _kconf.load_config(filename)
+        _s.kconf.load_config(filename)
         return True
     except OSError as e:
         _error(
@@ -1893,9 +1872,9 @@ def _key_dialog(title, text, keys):
 
             _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-            _term.update()
+            _s.term.update()
 
-            c = _term.read_key()
+            c = _s.term.read_key()
 
             if c == Key.RESIZE:
                 _resize_main()
@@ -1919,7 +1898,7 @@ def _key_dialog(title, text, keys):
 def _resize_key_dialog(win, text):
     # Resizes the key dialog to a size appropriate for the terminal size
 
-    screen_height, screen_width = _term.height, _term.width
+    screen_height, screen_width = _s.term.height, _s.term.width
 
     lines = text.split("\n")
 
@@ -1968,7 +1947,7 @@ def _button_dialog(title, text, buttons, default_button=0):
         lines = text.split("\n")
         # Height: border(1) + text lines + blank + separator(1) + buttons +
         # border(1) = 1 + len(lines) + 1 + 1 + 1 + 1 = len(lines) + 5
-        win_height = min(len(lines) + 5, _term.height - 4)
+        win_height = min(len(lines) + 5, _s.term.height - 4)
         # Calculate width from longest line and button row
         # Button row width includes buttons + spacing between them
         # 2 buttons: spacing 6, 3+ buttons: spacing 4
@@ -1978,11 +1957,11 @@ def _button_dialog(title, text, buttons, default_button=0):
         )
         win_width = min(
             max(max(len(line) for line in lines) + 4, button_row_width + 4),
-            _term.width - 4,
+            _s.term.width - 4,
         )
 
         win.resize(win_height, win_width)
-        win.move((_term.height - win_height) // 2, (_term.width - win_width) // 2)
+        win.move((_s.term.height - win_height) // 2, (_s.term.width - win_width) // 2)
 
         bottom_shadow, right_shadow = _create_shadow_for_win(win)
 
@@ -2025,23 +2004,23 @@ def _button_dialog(title, text, buttons, default_button=0):
 
             _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-            _term.update()
+            _s.term.update()
 
             # Handle input
-            c = _term.read_key()
+            c = _s.term.read_key()
 
             if c == Key.RESIZE:
                 _resize_main()
                 # Recompute dimensions for new terminal size
-                win_height = min(len(lines) + 5, _term.height - 4)
+                win_height = min(len(lines) + 5, _s.term.height - 4)
                 win_width = min(
                     max(max(len(line) for line in lines) + 4, button_row_width + 4),
-                    _term.width - 4,
+                    _s.term.width - 4,
                 )
                 win.resize(win_height, win_width)
                 win.move(
-                    (_term.height - win_height) // 2,
-                    (_term.width - win_width) // 2,
+                    (_s.term.height - win_height) // 2,
+                    (_s.term.width - win_width) // 2,
                 )
                 _close_shadow_windows(bottom_shadow, right_shadow)
                 bottom_shadow, right_shadow = _create_shadow_for_win(win)
@@ -2217,20 +2196,20 @@ def _create_shadow_windows(y, x, height, width, right_y_offset=1):
 
         # Bottom shadow region (1 line high, width wide, offset by 2 on x)
         bottom_shadow = None
-        if y + height < _term.height and x + 2 + width <= _term.width:
+        if y + height < _s.term.height and x + 2 + width <= _s.term.width:
             try:
-                bottom_shadow = _term.region(1, width, y + height, x + 2)
+                bottom_shadow = _s.term.region(1, width, y + height, x + 2)
                 bottom_shadow.fill(shadow_style)
             except Exception:
                 pass
 
         # Right shadow region
         right_shadow = None
-        if x + width + 2 <= _term.width and y + height <= _term.height:
+        if x + width + 2 <= _s.term.width and y + height <= _s.term.height:
             try:
                 shadow_height = height - right_y_offset + 1
                 if shadow_height > 0:
-                    right_shadow = _term.region(
+                    right_shadow = _s.term.region(
                         shadow_height, 2, y + right_y_offset, x + width
                     )
                     right_shadow.fill(shadow_style)
@@ -2253,7 +2232,7 @@ def _close_shadow_windows(bottom_shadow, right_shadow):
 
 
 def _refresh_shadow_windows(bottom_shadow, right_shadow):
-    # Shadow regions are composited automatically by _term.update().
+    # Shadow regions are composited automatically by _s.term.update().
     # Just clear and refill them to ensure correct content.
     for shadow in (bottom_shadow, right_shadow):
         if shadow:
@@ -2291,7 +2270,7 @@ def _jump_to_matches(search_string):
         # with re.search(), which matches anywhere in the string.
         #
         # It's not horrible either way. Just a bit smoother.
-        prefix = _kconf.config_prefix.lower()
+        prefix = _s.kconf.config_prefix.lower()
         prefix_len = len(prefix)
 
         regex_searches = [
@@ -2383,13 +2362,13 @@ def _jump_to_dialog():
         def _jump_to_shadows():
             # Shadow windows cover the dialog area (everything except help win)
             _close_shadow_windows(bottom_shadow, right_shadow)
-            sh, sw = _term.height, _term.width
+            sh, sw = _s.term.height, _s.term.width
             dh = sh - len(_JUMP_TO_HELP_LINES) - 1
             return _create_shadow_windows(0, 0, dh, sw, right_y_offset=1)
 
         bottom_shadow, right_shadow = _jump_to_shadows()
 
-        _term.show_cursor(very_visible=True)
+        _s.term.show_cursor(very_visible=True)
 
         # Functional variants of _select_{next,prev}_menu_entry() that return
         # new (sel_node_i, scroll) tuples instead of mutating globals, to
@@ -2443,18 +2422,18 @@ def _jump_to_dialog():
             # Refresh shadow windows after all other windows
             _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-            _term.update()
+            _s.term.update()
 
-            c = _term.read_key()
+            c = _s.term.read_key()
 
             if c == "\n":
                 if matches:
                     _jump_to(matches[sel_node_i])
-                    _term.hide_cursor()
+                    _s.term.hide_cursor()
                     return True
 
             elif c == "\x1b":  # ESC
-                _term.hide_cursor()
+                _s.term.hide_cursor()
                 return False
 
             elif c == Key.RESIZE:
@@ -2469,9 +2448,9 @@ def _jump_to_dialog():
 
             elif c == "\x06":  # Ctrl-F
                 if matches:
-                    _term.hide_cursor()
+                    _s.term.hide_cursor()
                     _info_dialog(matches[sel_node_i], True)
-                    _term.show_cursor(very_visible=True)
+                    _s.term.show_cursor(very_visible=True)
 
                     scroll = _resize_jump_to_dialog(
                         edit_box, matches_win, bot_sep_win, help_win, sel_node_i, scroll
@@ -2515,49 +2494,43 @@ def _jump_to_dialog():
                 r.close()
 
 
-_cached_sc_nodes = []
-
-
 def _sorted_sc_nodes():
     # Returns a sorted list of symbol and choice nodes to search. The symbol
     # nodes appear first, sorted by name, and then the choice nodes, sorted by
     # prompt and (secondarily) name.
 
-    if not _cached_sc_nodes:
+    if not _s.cached_sc_nodes:
         # Add symbol nodes
-        for sym in sorted(_kconf.unique_defined_syms, key=lambda sym: sym.name):
-            _cached_sc_nodes.extend(sym.nodes)
+        for sym in sorted(_s.kconf.unique_defined_syms, key=lambda sym: sym.name):
+            _s.cached_sc_nodes.extend(sym.nodes)
 
         # Add choice nodes
 
-        choices = sorted(_kconf.unique_choices, key=lambda choice: choice.name or "")
+        choices = sorted(_s.kconf.unique_choices, key=lambda choice: choice.name or "")
 
-        _cached_sc_nodes.extend(
+        _s.cached_sc_nodes.extend(
             sorted(
                 [node for choice in choices for node in choice.nodes],
                 key=lambda node: node.prompt[0] if node.prompt else "",
             )
         )
 
-    return _cached_sc_nodes
-
-
-_cached_menu_comment_nodes = []
+    return _s.cached_sc_nodes
 
 
 def _sorted_menu_comment_nodes():
     # Returns a list of menu and comment nodes to search, sorted by prompt,
     # with the menus first
 
-    if not _cached_menu_comment_nodes:
+    if not _s.cached_menu_comment_nodes:
 
         def prompt_text(mc):
             return mc.prompt[0]
 
-        _cached_menu_comment_nodes.extend(sorted(_kconf.menus, key=prompt_text))
-        _cached_menu_comment_nodes.extend(sorted(_kconf.comments, key=prompt_text))
+        _s.cached_menu_comment_nodes.extend(sorted(_s.kconf.menus, key=prompt_text))
+        _s.cached_menu_comment_nodes.extend(sorted(_s.kconf.comments, key=prompt_text))
 
-    return _cached_menu_comment_nodes
+    return _s.cached_menu_comment_nodes
 
 
 def _resize_jump_to_dialog(
@@ -2568,7 +2541,7 @@ def _resize_jump_to_dialog(
     # Returns the new scroll index. We adjust the scroll if needed so that the
     # selected node stays visible.
 
-    screen_height, screen_width = _term.height, _term.width
+    screen_height, screen_width = _s.term.height, _s.term.width
 
     bot_sep_win.resize(1, screen_width)
 
@@ -2715,7 +2688,7 @@ def _draw_jump_to_dialog(
     visible_s = s[hscroll : hscroll + edit_width]
     edit_box.write(1, 1, visible_s, _style["jump-edit"])
 
-    _term.set_cursor(edit_box, 1, 1 + s_i - hscroll)
+    _s.term.set_cursor(edit_box, 1, 1 + s_i - hscroll)
 
 
 def _info_dialog(node, from_jump_to_dialog):
@@ -2749,9 +2722,9 @@ def _info_dialog(node, from_jump_to_dialog):
 
             _refresh_shadow_windows(bottom_shadow, right_shadow)
 
-            _term.update()
+            _s.term.update()
 
-            c = _term.read_key()
+            c = _s.term.read_key()
 
             if c == Key.RESIZE:
                 _resize_main()
@@ -2832,7 +2805,7 @@ def _resize_info_dialog(win, node, lines):
     # full-screen: height = screen_height - 4, width = screen_width - 5,
     # centered on the terminal.
 
-    screen_height, screen_width = _term.height, _term.width
+    screen_height, screen_width = _s.term.height, _s.term.width
 
     # Match dialog_textbox() sizing
     dlg_height = screen_height - 4
@@ -2941,12 +2914,12 @@ def _info_str_mconf(node):
             if n.prompt:
                 s += f"Defined at {n.filename}:{n.linenr}\n"
                 s += f"  Prompt: {n.prompt[0]}\n"
-                if n.dep is not _kconf.y:
+                if n.dep is not _s.kconf.y:
                     s += f"  Depends on: {uicommon.expr_str_with_values(n.dep)}\n"
                 # Location hierarchy (matching get_prompt_str in mconf)
                 submenu = []
                 m = n
-                while m is not _kconf.top_node and len(submenu) < 8:
+                while m is not _s.kconf.top_node and len(submenu) < 8:
                     submenu.append(m)
                     m = m.parent
                 s += "  Location:\n"
@@ -2966,16 +2939,19 @@ def _info_str_mconf(node):
         for n in sc.nodes:
             if not n.prompt:
                 s += f"Defined at {n.filename}:{n.linenr}\n"
-                if n.dep is not _kconf.y:
+                if n.dep is not _s.kconf.y:
                     s += f"  Depends on: {uicommon.expr_str_with_values(n.dep)}\n"
 
         # Selects (symbols only)
         if isinstance(sc, Symbol) and sc.selects:
-            sel_strs = [uicommon.expr_str_with_values(sel_sym) for sel_sym, cond in sc.orig_selects]
+            sel_strs = [
+                uicommon.expr_str_with_values(sel_sym)
+                for sel_sym, cond in sc.orig_selects
+            ]
             s += "Selects: {}\n".format(" && ".join(sel_strs))
 
         # Selected by
-        if isinstance(sc, Symbol) and sc.rev_dep is not _kconf.n:
+        if isinstance(sc, Symbol) and sc.rev_dep is not _s.kconf.n:
             for val, label in (
                 (2, "Selected by [y]:"),
                 (1, "Selected by [m]:"),
@@ -2993,11 +2969,14 @@ def _info_str_mconf(node):
 
         # Implies (symbols only)
         if isinstance(sc, Symbol) and sc.implies:
-            imp_strs = [uicommon.expr_str_with_values(imp_sym) for imp_sym, cond in sc.orig_implies]
+            imp_strs = [
+                uicommon.expr_str_with_values(imp_sym)
+                for imp_sym, cond in sc.orig_implies
+            ]
             s += "Implies: {}\n".format(" && ".join(imp_strs))
 
         # Implied by
-        if isinstance(sc, Symbol) and sc.weak_rev_dep is not _kconf.n:
+        if isinstance(sc, Symbol) and sc.weak_rev_dep is not _s.kconf.n:
             for val, label in (
                 (2, "Implied by [y]:"),
                 (1, "Implied by [m]:"),
@@ -3126,7 +3105,7 @@ def _direct_dep_info(sc):
 
     return (
         ""
-        if sc.direct_dep is _kconf.y
+        if sc.direct_dep is _s.kconf.y
         else f"Direct dependencies (={TRI_TO_STR[expr_value(sc.direct_dep)]}):\n{uicommon.split_expr_info(sc.direct_dep, 2)}\n"
     )
 
@@ -3160,7 +3139,7 @@ def _defaults_info(sc):
             s += val.name
         s += "\n"
 
-        if cond is not _kconf.y:
+        if cond is not _s.kconf.y:
             s += f"    Condition (={TRI_TO_STR[expr_value(cond)]}):\n{uicommon.split_expr_info(cond, 4)}"
 
     return s + "\n"
@@ -3184,14 +3163,14 @@ def _select_imply_info(sym):
 
     s = ""
 
-    if sym.rev_dep is not _kconf.n:
+    if sym.rev_dep is not _s.kconf.n:
         s += sis(sym.rev_dep, 2, "Symbols currently y-selecting this symbol:\n")
         s += sis(sym.rev_dep, 1, "Symbols currently m-selecting this symbol:\n")
         s += sis(
             sym.rev_dep, 0, "Symbols currently n-selecting this symbol (no effect):\n"
         )
 
-    if sym.weak_rev_dep is not _kconf.n:
+    if sym.weak_rev_dep is not _s.kconf.n:
         s += sis(sym.weak_rev_dep, 2, "Symbols currently y-implying this symbol:\n")
         s += sis(sym.weak_rev_dep, 1, "Symbols currently m-implying this symbol:\n")
         s += sis(
@@ -3231,7 +3210,7 @@ def _menu_path_info(node):
 
     path = ""
 
-    while node.parent is not _kconf.top_node:
+    while node.parent is not _s.kconf.top_node:
         node = node.parent
 
         # Promptless choices might appear among the parents. Use
@@ -3257,7 +3236,7 @@ def _styled_region(style):
     # character. The initial dimensions are (1, 1), so the region needs to be
     # sized and positioned separately.
 
-    win = _term.region(1, 1)
+    win = _s.term.region(1, 1)
     win.fill(_style[style])
     return win
 
@@ -3483,7 +3462,7 @@ def _should_show_name(node):
 
     # The 'not node.prompt' case only hits in show-all mode, for promptless
     # symbols and choices
-    return not node.prompt or (_show_name and isinstance(node.item, (Symbol, Choice)))
+    return not node.prompt or (_s.show_name and isinstance(node.item, (Symbol, Choice)))
 
 
 def _value_str(node):
@@ -3553,13 +3532,13 @@ def _warn(*args):
     # Temporarily exits terminal mode and prints a warning to stderr.
     # The warning would get lost in terminal mode.
     try:
-        _term.suspend()
+        _s.term.suspend()
     except Exception:
         pass
     print("menuconfig warning: ", end="", file=sys.stderr)
     print(*args, file=sys.stderr)
     try:
-        _term.resume()
+        _s.term.resume()
     except Exception:
         pass
 
