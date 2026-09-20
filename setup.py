@@ -16,6 +16,7 @@ _PACKAGE = "kconfiglib"
 _MODULES = (
     _PACKAGE,
     "rawterm",
+    "uicommon",
     "menuconfig",
     "guiconfig",
     "genconfig",

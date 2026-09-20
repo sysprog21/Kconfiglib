@@ -147,8 +147,9 @@ jobs:
                     continue
             assert callable(entry.load()), entry.name
 
-        # rawterm ships no script of its own
-        importlib.import_module("kconfiglib.rawterm")
+        # These two ship no script of their own
+        for module in ("kconfiglib.rawterm", "kconfiglib.uicommon"):
+            importlib.import_module(module)
 
         print(f"{len(installed)} console scripts resolve")
         PY

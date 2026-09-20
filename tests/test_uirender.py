@@ -17,6 +17,8 @@
 import pytest
 
 import menuconfig
+import uicommon
+from conftest import named_menu, node
 from kconfiglib import Kconfig
 
 
@@ -53,17 +55,6 @@ def gc_(kconf, monkeypatch):
 @pytest.fixture
 def ui(request):
     return request.getfixturevalue("mc" if request.param == "menuconfig" else "gc_")
-
-
-def node(kconf, name):
-    return kconf.syms[name].nodes[0]
-
-
-def named_menu(kconf, prompt):
-    for menu in kconf.menus:
-        if menu.prompt[0] == prompt:
-            return menu
-    raise AssertionError(f"no menu titled {prompt!r}")
 
 
 # --- menuconfig._value_str: one case per branch -----------------------------
@@ -222,7 +213,11 @@ def test_guiconfig_choice_sym_prompt_falls_back(gc_, kconf):
     assert gc_._choice_sym_prompt(kconf.syms["PROMPTLESS"], choice_node) is None
 
 
-# --- the two tools must agree on what is changeable -------------------------
+# --- what counts as changeable ----------------------------------------------
+#
+# These used to be parametrized over both tools, because each carried its own
+# copy of changeable(). There is one copy now, in uicommon, so parametrizing
+# would run the same function twice and drag tkinter in to do it.
 
 
 @pytest.mark.parametrize(
@@ -237,18 +232,15 @@ def test_guiconfig_choice_sym_prompt_falls_back(gc_, kconf):
         ("PROMPTLESS", False),
     ],
 )
-@pytest.mark.parametrize("ui", ("menuconfig", "guiconfig"), indirect=True)
-def test_changeable_agrees_between_tools(ui, kconf, sym, expected):
-    # 'is' rather than '==': _changeable() is documented to return True/False,
+def test_changeable(kconf, sym, expected):
+    # 'is' rather than '==': changeable() is documented to return True/False,
     # and it used to leak the None from the end of an 'and' chain instead
-    n = node(kconf, sym)
-    assert ui._changeable(n) is expected
+    assert uicommon.changeable(node(kconf, sym)) is expected
 
 
-@pytest.mark.parametrize("ui", ("menuconfig", "guiconfig"), indirect=True)
-def test_changeable_rejects_menus_and_comments(ui, kconf):
+def test_changeable_rejects_menus_and_comments(kconf):
     for n in (named_menu(kconf, "A menu"), kconf.comments[0]):
-        assert ui._changeable(n) is False
+        assert uicommon.changeable(n) is False
 
 
 # --- menuconfig._shown_nodes: what actually reaches the screen --------------
@@ -281,11 +273,10 @@ def test_shown_nodes_of_an_empty_menu_is_empty(mc, kconf, monkeypatch):
     assert mc._shown_nodes(named_menu(kconf, "A menu")) != []
 
 
-@pytest.mark.parametrize("ui", ("menuconfig", "guiconfig"), indirect=True)
-def test_is_y_mode_choice_sym_returns_a_real_bool(ui, kconf):
-    """The predicate feeding _changeable() must not leak a None."""
-    assert ui._is_y_mode_choice_sym(kconf.syms["CHOICE_A"]) is True
+def test_is_y_mode_choice_sym_returns_a_real_bool(kconf):
+    """The predicate feeding changeable() must not leak a None."""
+    assert uicommon.is_y_mode_choice_sym(kconf.syms["CHOICE_A"]) is True
     # Not a choice symbol at all
-    assert ui._is_y_mode_choice_sym(kconf.syms["BOOL_SYM"]) is False
+    assert uicommon.is_y_mode_choice_sym(kconf.syms["BOOL_SYM"]) is False
     # Not a Symbol at all
-    assert ui._is_y_mode_choice_sym(kconf.choices[0]) is False
+    assert uicommon.is_y_mode_choice_sym(kconf.choices[0]) is False

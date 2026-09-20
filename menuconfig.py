@@ -197,10 +197,11 @@ import re
 import textwrap
 
 if __package__:
-    from . import rawterm
+    from . import rawterm, uicommon
     from .rawterm import Key, Box, Style, Color, NAMED_COLORS
 else:
     import rawterm
+    import uicommon
     from rawterm import Key, Box, Style, Color, NAMED_COLORS
 
 from kconfiglib import (
@@ -216,7 +217,6 @@ from kconfiglib import (
     HEX,
     AND,
     OR,
-    expr_str,
     expr_value,
     split_expr,
     standard_sc_expr_str,
@@ -1019,7 +1019,7 @@ def _jump_to(node):
         _cur_menu = node
         node = node.list
     else:
-        _cur_menu = _parent_menu(node)
+        _cur_menu = uicommon.parent_menu(node)
 
     _shown = _shown_nodes(_cur_menu)
     if node not in _shown:
@@ -1057,7 +1057,7 @@ def _leave_menu():
         return
 
     # Jump to parent menu
-    parent = _parent_menu(_cur_menu)
+    parent = uicommon.parent_menu(_cur_menu)
     _shown = _shown_nodes(parent)
 
     try:
@@ -1352,7 +1352,7 @@ def _draw_main():
     for i in range(_menu_scroll, min(_menu_scroll + menu_height, len(_shown))):
         node = _shown[i]
 
-        if _visible(node) or not _show_all:
+        if uicommon.visible(node) or not _show_all:
             style = _style["selection" if i == _sel_node_i else "list"]
         else:
             style = _style["inv-selection" if i == _sel_node_i else "inv-list"]
@@ -1433,17 +1433,6 @@ def _draw_main_buttons(win, dlg_h, dlg_w):
         _print_button(win, label, button_y, bx, i == _active_button)
 
 
-def _parent_menu(node):
-    # Returns the menu node of the menu that contains 'node'. In addition to
-    # proper 'menu's, this might also be a 'menuconfig' symbol or a 'choice'.
-    # "Menu" here means a menu in the interface.
-
-    menu = node.parent
-    while not menu.is_menuconfig:
-        menu = menu.parent
-    return menu
-
-
 def _shown_nodes(menu):
     # Returns the list of menu nodes from 'menu' (see _parent_menu()) that
     # would be shown when entering it
@@ -1452,7 +1441,7 @@ def _shown_nodes(menu):
         res = []
 
         while node:
-            if _visible(node) or _show_all:
+            if uicommon.visible(node) or _show_all:
                 res.append(node)
                 if node.list and not node.is_menuconfig:
                     # Nodes from implicit menu created from dependencies. Will
@@ -1516,17 +1505,6 @@ def _shown_nodes(menu):
     return rec(menu.list)
 
 
-def _visible(node):
-    # Returns True if the node should appear in the menu (outside show-all
-    # mode)
-
-    return (
-        node.prompt
-        and expr_value(node.prompt[1])
-        and not (node.item == MENU and not expr_value(node.visibility))
-    )
-
-
 def _change_node(node):
     # Changes the value of the menu node 'node' if it is a symbol. Bools and
     # tristates are toggled, while other symbol types pop up a text entry
@@ -1534,7 +1512,7 @@ def _change_node(node):
     #
     # Returns False if the value of 'node' can't be changed.
 
-    if not _changeable(node):
+    if not uicommon.changeable(node):
         return False
 
     # sc = symbol/choice
@@ -1547,7 +1525,7 @@ def _change_node(node):
             s = _input_dialog(
                 f"{node.prompt[0]} ({TYPE_TO_STR[sc.orig_type]})",
                 s,
-                _range_info(sc),
+                uicommon.range_info(sc),
             )
 
             if s is None:
@@ -1576,7 +1554,7 @@ def _change_node(node):
         val_index = sc.assignable.index(sc.tri_value)
         _set_val(sc, sc.assignable[(val_index + 1) % len(sc.assignable)])
 
-    if _is_y_mode_choice_sym(sc) and not node.list:
+    if uicommon.is_y_mode_choice_sym(sc) and not node.list:
         # Immediately jump to the parent menu after making a choice selection,
         # like 'make menuconfig' does, except if the menu node has children
         # (which can happen if a symbol 'depends on' a choice symbol that
@@ -1584,27 +1562,6 @@ def _change_node(node):
         _leave_menu()
 
     return True
-
-
-def _changeable(node):
-    # Returns True if the value if 'node' can be changed
-
-    sc = node.item
-
-    if not isinstance(sc, (Symbol, Choice)):
-        return False
-
-    # This will hit for invisible symbols, which appear in show-all mode and
-    # when an invisible symbol has visible children (which can happen e.g. for
-    # symbols with optional prompts)
-    if not (node.prompt and expr_value(node.prompt[1])):
-        return False
-
-    return (
-        sc.orig_type in (STRING, INT, HEX)
-        or len(sc.assignable) > 1
-        or _is_y_mode_choice_sym(sc)
-    )
 
 
 def _set_sel_node_tri_val(tri_val):
@@ -2697,7 +2654,7 @@ def _draw_jump_to_dialog(
             node = matches[i]
 
             if isinstance(node.item, (Symbol, Choice)):
-                node_str = _name_and_val_str(node.item)
+                node_str = uicommon.name_and_val_str(node.item)
                 if node.prompt:
                     node_str += f' "{node.prompt[0]}"'
             elif node.item == MENU:
@@ -2985,7 +2942,7 @@ def _info_str_mconf(node):
                 s += f"Defined at {n.filename}:{n.linenr}\n"
                 s += f"  Prompt: {n.prompt[0]}\n"
                 if n.dep is not _kconf.y:
-                    s += f"  Depends on: {_expr_str(n.dep)}\n"
+                    s += f"  Depends on: {uicommon.expr_str_with_values(n.dep)}\n"
                 # Location hierarchy (matching get_prompt_str in mconf)
                 submenu = []
                 m = n
@@ -3010,11 +2967,11 @@ def _info_str_mconf(node):
             if not n.prompt:
                 s += f"Defined at {n.filename}:{n.linenr}\n"
                 if n.dep is not _kconf.y:
-                    s += f"  Depends on: {_expr_str(n.dep)}\n"
+                    s += f"  Depends on: {uicommon.expr_str_with_values(n.dep)}\n"
 
         # Selects (symbols only)
         if isinstance(sc, Symbol) and sc.selects:
-            sel_strs = [_expr_str(sel_sym) for sel_sym, cond in sc.orig_selects]
+            sel_strs = [uicommon.expr_str_with_values(sel_sym) for sel_sym, cond in sc.orig_selects]
             s += "Selects: {}\n".format(" && ".join(sel_strs))
 
         # Selected by
@@ -3036,7 +2993,7 @@ def _info_str_mconf(node):
 
         # Implies (symbols only)
         if isinstance(sc, Symbol) and sc.implies:
-            imp_strs = [_expr_str(imp_sym) for imp_sym, cond in sc.orig_implies]
+            imp_strs = [uicommon.expr_str_with_values(imp_sym) for imp_sym, cond in sc.orig_implies]
             s += "Implies: {}\n".format(" && ".join(imp_strs))
 
         # Implied by
@@ -3093,7 +3050,7 @@ def _info_str(node):
             + f"Type: {TYPE_TO_STR[choice.type]}\n"
             + f"Mode: {choice.str_value}\n"
             + _help_info(choice)
-            + _choice_syms_info(choice)
+            + uicommon.choice_syms_info(choice)
             + _direct_dep_info(choice)
             + _defaults_info(choice)
             + _kconfig_def_info(choice)
@@ -3147,21 +3104,6 @@ def _value_info(sym):
     return s
 
 
-def _choice_syms_info(choice):
-    # Returns a string listing the choice symbols in 'choice'. Adds
-    # "(selected)" next to the selected one.
-
-    s = "Choice symbols:\n"
-
-    for sym in choice.syms:
-        s += "  - " + sym.name
-        if sym is choice.selection:
-            s += " (selected)"
-        s += "\n"
-
-    return s + "\n"
-
-
 def _help_info(sc):
     # Returns a string with the help text(s) of 'sc' (Symbol or Choice).
     # Symbols and choices defined in multiple locations can have multiple help
@@ -3185,7 +3127,7 @@ def _direct_dep_info(sc):
     return (
         ""
         if sc.direct_dep is _kconf.y
-        else f"Direct dependencies (={TRI_TO_STR[expr_value(sc.direct_dep)]}):\n{_split_expr_info(sc.direct_dep, 2)}\n"
+        else f"Direct dependencies (={TRI_TO_STR[expr_value(sc.direct_dep)]}):\n{uicommon.split_expr_info(sc.direct_dep, 2)}\n"
     )
 
 
@@ -3203,7 +3145,7 @@ def _defaults_info(sc):
     for val, cond in sc.orig_defaults:
         s += "  - "
         if isinstance(sc, Symbol):
-            s += _expr_str(val)
+            s += uicommon.expr_str_with_values(val)
 
             # Skip the tristate value hint if the expression is just a single
             # symbol. _expr_str() already shows its value as a string.
@@ -3219,39 +3161,9 @@ def _defaults_info(sc):
         s += "\n"
 
         if cond is not _kconf.y:
-            s += f"    Condition (={TRI_TO_STR[expr_value(cond)]}):\n{_split_expr_info(cond, 4)}"
+            s += f"    Condition (={TRI_TO_STR[expr_value(cond)]}):\n{uicommon.split_expr_info(cond, 4)}"
 
     return s + "\n"
-
-
-def _split_expr_info(expr, indent):
-    # Returns a string with 'expr' split into its top-level && or || operands,
-    # with one operand per line, together with the operand's value. This is
-    # usually enough to get something readable for long expressions. A fancier
-    # recursive thingy would be possible too.
-    #
-    # indent:
-    #   Number of leading spaces to add before the split expression.
-
-    if len(split_expr(expr, AND)) > 1:
-        split_op = AND
-        op_str = "&&"
-    else:
-        split_op = OR
-        op_str = "||"
-
-    s = ""
-    for i, term in enumerate(split_expr(expr, split_op)):
-        s += "{}{} {}".format(indent * " ", "  " if i == 0 else op_str, _expr_str(term))
-
-        # Don't bother showing the value hint if the expression is just a
-        # single symbol. _expr_str() already shows its value.
-        if isinstance(term, tuple):
-            s += f"  (={TRI_TO_STR[expr_value(term)]})"
-
-        s += "\n"
-
-    return s
 
 
 def _select_imply_info(sym):
@@ -3306,22 +3218,12 @@ def _kconfig_def_info(item):
         s += (
             "\n\n"
             f"At {node.filename}:{node.linenr}\n"
-            f"{_include_path_info(node)}"
+            f"{uicommon.include_path_info(node)}"
             f"Menu path: {_menu_path_info(node)}\n\n"
-            f"{_indent(node.custom_str(_name_and_val_str), 2)}"
+            f"{_indent(node.custom_str(uicommon.name_and_val_str), 2)}"
         )
 
     return s
-
-
-def _include_path_info(node):
-    if not node.include_path:
-        # In the top-level Kconfig file
-        return ""
-
-    return "Included via {}\n".format(
-        " -> ".join(f"{filename}:{linenr}" for filename, linenr in node.include_path)
-    )
 
 
 def _menu_path_info(node):
@@ -3348,29 +3250,6 @@ def _indent(s, n):
     # Returns 's' with each line indented 'n' spaces.
 
     return "\n".join(n * " " + line for line in s.split("\n"))
-
-
-def _name_and_val_str(sc):
-    # Custom symbol/choice printer that shows symbol values after symbols
-
-    # Show the values of non-constant (non-quoted) symbols that don't look like
-    # numbers. Things like 123 are actually symbol references, and only work as
-    # expected due to undefined symbols getting their name as their value.
-    # Showing the symbol value for those isn't helpful though.
-    if isinstance(sc, Symbol) and not sc.is_constant and not _is_num(sc.name):
-        if not sc.nodes:
-            # Undefined symbol reference
-            return f"{sc.name}(undefined/n)"
-
-        return f"{sc.name}(={sc.str_value})"
-
-    # For other items, use the standard format
-    return standard_sc_expr_str(sc)
-
-
-def _expr_str(expr):
-    # Custom expression printer that shows symbol values
-    return expr_str(expr, _name_and_val_str)
 
 
 def _styled_region(style):
@@ -3624,7 +3503,7 @@ def _value_str(node):
 
     # BOOL or TRISTATE
 
-    if _is_y_mode_choice_sym(item):
+    if uicommon.is_y_mode_choice_sym(item):
         return "(X)" if item.choice.selection is item else "( )"
 
     tri_val_str = (" ", "M", "*")[item.tri_value]
@@ -3640,15 +3519,6 @@ def _value_str(node):
     if item.assignable == (1, 2):
         return f"{{{tri_val_str}}}"  # {M}/{*}
     return f"<{tri_val_str}>"
-
-
-def _is_y_mode_choice_sym(item):
-    # The choice mode is an upper bound on the visibility of choice symbols, so
-    # we can check the choice symbols' own visibility to see if the choice is
-    # in y mode.
-    #
-    # 'is not None' so that a non-choice symbol yields False rather than None
-    return isinstance(item, Symbol) and item.choice is not None and item.visibility == 2
 
 
 def _check_valid(sym, s):
@@ -3675,37 +3545,6 @@ def _check_valid(sym, s):
                 return False
 
             break
-
-    return True
-
-
-def _range_info(sym):
-    # Returns a string with information about the valid range for the symbol
-    # 'sym', or None if 'sym' doesn't have a range
-
-    if sym.orig_type in (INT, HEX):
-        for low, high, cond, _ in sym.ranges:
-            if expr_value(cond):
-                return f"Range: {low.str_value}-{high.str_value}"
-
-    return None
-
-
-def _is_num(name):
-    # Heuristic to see if a symbol name looks like a number, for nicer output
-    # when printing expressions. Things like 16 are actually symbol names, only
-    # they get their name as their value when the symbol is undefined.
-
-    try:
-        int(name)
-    except ValueError:
-        if not name.startswith(("0x", "0X")):
-            return False
-
-        try:
-            int(name, 16)
-        except ValueError:
-            return False
 
     return True
 
