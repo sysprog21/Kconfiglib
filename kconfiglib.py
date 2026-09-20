@@ -634,7 +634,7 @@ from collections import namedtuple
 from glob import iglob
 from os.path import dirname, exists, expandvars, isabs, islink, join, realpath
 
-VERSION = (14, 1, 0)
+VERSION = (15, 0, 0)
 
 # Record types for the location-bearing Symbol/Choice properties. These are
 # tuple subclasses, so existing positional unpacking and indexing keep working

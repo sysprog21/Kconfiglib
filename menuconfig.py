@@ -196,8 +196,12 @@ import locale
 import re
 import textwrap
 
-import rawterm
-from rawterm import Key, Box, Style, Color, NAMED_COLORS
+if __package__:
+    from . import rawterm
+    from .rawterm import Key, Box, Style, Color, NAMED_COLORS
+else:
+    import rawterm
+    from rawterm import Key, Box, Style, Color, NAMED_COLORS
 
 from kconfiglib import (
     Symbol,
