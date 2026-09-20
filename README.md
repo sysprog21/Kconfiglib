@@ -42,6 +42,13 @@ pip install git+https://github.com/sysprog21/Kconfiglib
 
 Microsoft Windows is supported.
 
+An installed Kconfiglib is a single `kconfiglib` package, so the interfaces are
+imported as `from kconfiglib import menuconfig` rather than `import menuconfig`
+(the latter worked before 15.0.0, when every module landed loose in
+site-packages). The sources stay flat in a checkout, which means a bare
+`kconfiglib.py` in the working directory shadows the installed package there:
+run `import kconfiglib.menuconfig` from somewhere other than the source tree.
+
 When installed via `pip`, you get both the core library and the following executables.
 All but three (`genconfig`, `setconfig`, and `lint`) mirror functionality available in the C tools.
 - [menuconfig](menuconfig.py)
@@ -177,7 +184,7 @@ This will work even after installing Kconfiglib with `pip`.
 Documentation for other modules can be viewed the same way.
 For executables, a plain `--help` often suffices:
 ```shell
-pydoc menuconfig/guiconfig/...
+pydoc kconfiglib.menuconfig kconfiglib.guiconfig
 ```
 
 A good place to start is the module docstring, located at the beginning of [kconfiglib.py](kconfiglib.py).

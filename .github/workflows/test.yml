@@ -87,15 +87,17 @@ jobs:
           # backstop against a large drop, not a ratchet; raise it as
           # coverage improves.
           #
-          # 35 is set against what these runners report, which is 40. Do not
+          # 38 is set against what these runners report, which is 41. Do not
           # calibrate it from a local run on Python 3.14 or newer: coverage
           # switches to the sys.monitoring backend there and scores the same
-          # suite at 51, and a floor taken from that number fails every job
-          # here. COVERAGE_CORE=ctrace reproduces the runner figure locally.
+          # suite differently, and a floor taken from that number fails every
+          # job here. COVERAGE_CORE=ctrace reproduces the runner figure
+          # locally.
           python -m pytest tests/ --ignore=tests/test_conformance.py \
             --cov=kconfiglib --cov=menuconfig --cov=guiconfig --cov=rawterm \
+            --cov=uicommon \
             --cov-report=term --cov-report=xml:coverage.xml \
-            --cov-fail-under=35
+            --cov-fail-under=38
         fi
 
     - name: Store coverage report
@@ -125,6 +127,50 @@ jobs:
       run: |
         python .ci/validate-rawterm.py
         if errorlevel 1 exit /b %errorlevel%
+
+    - name: Benchmark the load and UI hot paths
+      # No pass/fail threshold, and read the numbers with care. Measured on
+      # this fixture, phase timings move by around 7% run to run on an idle
+      # machine and around 30% on a busy one; the spread is cross-process
+      # fixed cost, not the timing loop, so raising -n does not close it. A
+      # shared runner is the busy case. So this attributes a large regression
+      # and nothing subtler, and the value is the trend across runs rather
+      # than any single number. Pointing it at a tree big enough for the
+      # phases to run in milliseconds would tighten it.
+      if: ${{ matrix.target.headless-only != true }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Measured once: --json returns before printing the table, so a
+        # second run would re-measure everything and the table shown here
+        # would not be the numbers in the artifact. Render the table from
+        # the captured JSON instead, so the log and the artifact agree.
+        python scripts/benchmark.py --tree tests --kconfig Kuirender \
+          --json > benchmark.json
+        python - <<'PY'
+        import json
+
+        with open("benchmark.json") as f:
+            phases = json.load(f)
+
+        print(f"{'phase':<28} {'best':>10}   detail")
+        print("-" * 72)
+        for name, data in sorted(phases.items()):
+            seconds = data.get("seconds")
+            best = "-" if seconds is None else f"{seconds * 1000:.2f}ms"
+            detail = ", ".join(
+                f"{k}={v}" for k, v in sorted(data.items()) if k != "seconds"
+            )
+            print(f"{name:<28} {best:>10}   {detail}")
+        PY
+
+    - name: Store benchmark timings
+      if: ${{ !cancelled() && matrix.target.headless-only != true }}
+      uses: actions/upload-artifact@v6
+      with:
+        name: benchmark-${{ matrix.target.os }}-py${{ matrix.target.python }}
+        path: benchmark.json
+        if-no-files-found: ignore
 
     - name: Diagnostic dump on failure
       if: failure()

@@ -86,3 +86,16 @@ def assign_and_verify_user_value(c, sym_name, val, user_val, valid):
 def verify_str(item, expected):
     """Verify str(item) matches expected (strip leading/trailing newline)."""
     assert str(item) == expected[1:-1]
+
+
+def node(kconf, name):
+    """The first menu node of symbol 'name'."""
+    return kconf.syms[name].nodes[0]
+
+
+def named_menu(kconf, prompt):
+    """The menu whose prompt is 'prompt'."""
+    for menu in kconf.menus:
+        if menu.prompt[0] == prompt:
+            return menu
+    raise AssertionError(f"no menu titled {prompt!r}")

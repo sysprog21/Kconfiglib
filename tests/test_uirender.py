@@ -17,6 +17,8 @@
 import pytest
 
 import menuconfig
+import uicommon
+from conftest import named_menu, node
 from kconfiglib import Kconfig
 
 
@@ -27,10 +29,12 @@ def kconf():
 
 @pytest.fixture
 def mc(kconf, monkeypatch):
-    """menuconfig with its module globals set up for rendering."""
-    monkeypatch.setattr(menuconfig, "_kconf", kconf, raising=False)
-    monkeypatch.setattr(menuconfig, "_show_all", True, raising=False)
-    monkeypatch.setattr(menuconfig, "_show_name", False, raising=False)
+    """menuconfig with its interface state set up for rendering."""
+    state = menuconfig._State()
+    state.kconf = kconf
+    state.show_all = True
+    state.show_name = False
+    monkeypatch.setattr(menuconfig, "_s", state)
     return menuconfig
 
 
@@ -53,17 +57,6 @@ def gc_(kconf, monkeypatch):
 @pytest.fixture
 def ui(request):
     return request.getfixturevalue("mc" if request.param == "menuconfig" else "gc_")
-
-
-def node(kconf, name):
-    return kconf.syms[name].nodes[0]
-
-
-def named_menu(kconf, prompt):
-    for menu in kconf.menus:
-        if menu.prompt[0] == prompt:
-            return menu
-    raise AssertionError(f"no menu titled {prompt!r}")
 
 
 # --- menuconfig._value_str: one case per branch -----------------------------
@@ -154,7 +147,7 @@ def test_menuconfig_node_str_y_mode_choice_shows_selection(mc, kconf):
 
 
 def test_menuconfig_show_name_appends_symbol_name(mc, kconf, monkeypatch):
-    monkeypatch.setattr(mc, "_show_name", True)
+    monkeypatch.setattr(mc._s, "show_name", True)
     assert mc._node_str(node(kconf, "BOOL_SYM")) == "[ ] <BOOL_SYM> A bool (NEW)"
 
 
@@ -222,7 +215,11 @@ def test_guiconfig_choice_sym_prompt_falls_back(gc_, kconf):
     assert gc_._choice_sym_prompt(kconf.syms["PROMPTLESS"], choice_node) is None
 
 
-# --- the two tools must agree on what is changeable -------------------------
+# --- what counts as changeable ----------------------------------------------
+#
+# These used to be parametrized over both tools, because each carried its own
+# copy of changeable(). There is one copy now, in uicommon, so parametrizing
+# would run the same function twice and drag tkinter in to do it.
 
 
 @pytest.mark.parametrize(
@@ -237,18 +234,15 @@ def test_guiconfig_choice_sym_prompt_falls_back(gc_, kconf):
         ("PROMPTLESS", False),
     ],
 )
-@pytest.mark.parametrize("ui", ("menuconfig", "guiconfig"), indirect=True)
-def test_changeable_agrees_between_tools(ui, kconf, sym, expected):
-    # 'is' rather than '==': _changeable() is documented to return True/False,
+def test_changeable(kconf, sym, expected):
+    # 'is' rather than '==': changeable() is documented to return True/False,
     # and it used to leak the None from the end of an 'and' chain instead
-    n = node(kconf, sym)
-    assert ui._changeable(n) is expected
+    assert uicommon.changeable(node(kconf, sym)) is expected
 
 
-@pytest.mark.parametrize("ui", ("menuconfig", "guiconfig"), indirect=True)
-def test_changeable_rejects_menus_and_comments(ui, kconf):
+def test_changeable_rejects_menus_and_comments(kconf):
     for n in (named_menu(kconf, "A menu"), kconf.comments[0]):
-        assert ui._changeable(n) is False
+        assert uicommon.changeable(n) is False
 
 
 # --- menuconfig._shown_nodes: what actually reaches the screen --------------
@@ -256,9 +250,9 @@ def test_changeable_rejects_menus_and_comments(ui, kconf):
 
 def test_shown_nodes_hides_promptless_symbols_until_show_all(mc, kconf, monkeypatch):
     """PROMPTLESS has no prompt, so it appears only in show-all mode."""
-    monkeypatch.setattr(mc, "_show_all", False)
+    monkeypatch.setattr(mc._s, "show_all", False)
     hidden = mc._shown_nodes(kconf.top_node)
-    monkeypatch.setattr(mc, "_show_all", True)
+    monkeypatch.setattr(mc._s, "show_all", True)
     shown = mc._shown_nodes(kconf.top_node)
 
     promptless = node(kconf, "PROMPTLESS")
@@ -269,23 +263,22 @@ def test_shown_nodes_hides_promptless_symbols_until_show_all(mc, kconf, monkeypa
 
 
 def test_shown_nodes_descends_into_a_menuconfig(mc, kconf, monkeypatch):
-    monkeypatch.setattr(mc, "_show_all", False)
+    monkeypatch.setattr(mc._s, "show_all", False)
     children = mc._shown_nodes(node(kconf, "MENUCONFIG_SYM"))
     assert children == [node(kconf, "UNDER_MENUCONFIG")]
 
 
 def test_shown_nodes_of_an_empty_menu_is_empty(mc, kconf, monkeypatch):
     """This is what makes _node_str() draw "----" instead of "--->"."""
-    monkeypatch.setattr(mc, "_show_all", False)
+    monkeypatch.setattr(mc._s, "show_all", False)
     assert mc._shown_nodes(named_menu(kconf, "Empty menu")) == []
     assert mc._shown_nodes(named_menu(kconf, "A menu")) != []
 
 
-@pytest.mark.parametrize("ui", ("menuconfig", "guiconfig"), indirect=True)
-def test_is_y_mode_choice_sym_returns_a_real_bool(ui, kconf):
-    """The predicate feeding _changeable() must not leak a None."""
-    assert ui._is_y_mode_choice_sym(kconf.syms["CHOICE_A"]) is True
+def test_is_y_mode_choice_sym_returns_a_real_bool(kconf):
+    """The predicate feeding changeable() must not leak a None."""
+    assert uicommon.is_y_mode_choice_sym(kconf.syms["CHOICE_A"]) is True
     # Not a choice symbol at all
-    assert ui._is_y_mode_choice_sym(kconf.syms["BOOL_SYM"]) is False
+    assert uicommon.is_y_mode_choice_sym(kconf.syms["BOOL_SYM"]) is False
     # Not a Symbol at all
-    assert ui._is_y_mode_choice_sym(kconf.choices[0]) is False
+    assert uicommon.is_y_mode_choice_sym(kconf.choices[0]) is False

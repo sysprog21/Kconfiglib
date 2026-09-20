@@ -1,2 +1,8 @@
 # Include the license file in source distributions
 include LICENSE
+
+# Ship the whole test suite, not just test_*.py: conftest.py, the helper
+# modules and the Kconfig fixtures are what make it runnable for a distro
+# packager building from the sdist.
+recursive-include tests *
+global-exclude __pycache__/* *.pyc

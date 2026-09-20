@@ -51,6 +51,119 @@ jobs:
         set -euo pipefail
         python setup.py bdist_wheel
 
+    - name: Check wheel layout
+      run: |
+        set -euo pipefail
+        python - <<'PY'
+        from pathlib import Path
+        from zipfile import ZipFile
+
+        # The wheel ships a kconfiglib package, not fifteen loose modules in
+        # site-packages. Nothing outside kconfiglib/ but metadata.
+        #
+        # That everything the console scripts name is present, importable and
+        # has the named attribute is checked by resolving them for real in the
+        # next step, which is strictly stronger than matching paths here.
+        wheel = next(Path("dist").glob("*.whl"))
+        with ZipFile(wheel) as archive:
+            names = set(archive.namelist())
+
+        stray = sorted(
+            name
+            for name in names
+            if not name.startswith("kconfiglib/") and ".dist-info/" not in name
+        )
+        assert not stray, f"unexpected wheel members: {stray}"
+        assert "kconfiglib/__init__.py" in names
+
+        print(f"{len(names)} members, nothing outside the package")
+        PY
+
+    - name: Check wheel install
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/wheel-env
+        /tmp/wheel-env/bin/pip install dist/*.whl
+        # The wheel's own list of console scripts, for the check below
+        python - <<'PY'
+        from pathlib import Path
+        from zipfile import ZipFile
+
+        wheel = next(Path("dist").glob("*.whl"))
+        with ZipFile(wheel) as archive:
+            name = next(
+                n for n in archive.namelist()
+                if n.endswith(".dist-info/entry_points.txt")
+            )
+            Path("/tmp/declared.txt").write_bytes(archive.read(name))
+        PY
+        export DECLARED=/tmp/declared.txt
+        # Not from the checkout: the root kconfiglib.py shadows the installed
+        # package whenever it is the working directory.
+        cd "$(mktemp -d)"
+        /tmp/wheel-env/bin/python - <<'PY'
+        import importlib
+        import os
+        from importlib.metadata import entry_points
+        from pathlib import Path
+
+        import kconfiglib
+
+        assert kconfiglib.Kconfig
+
+        # Resolve every console script the way the generated wrapper does, so
+        # a module that is present but broken, or a renamed main(), fails here
+        # rather than the first time a user runs it.
+        #
+        # Selected by module prefix rather than asserted over every script in
+        # the environment, which would also cover pip's, and rather than via
+        # distribution("kconfiglib"), which picks whichever metadata directory
+        # comes first when a stray egg-info is on the path.
+        installed = {
+            e.name: e
+            for e in entry_points(group="console_scripts")
+            if e.module.startswith("kconfiglib.")
+        }
+
+        # Against the wheel's own declaration, so that dropping a script
+        # still fails here rather than passing because the others survived.
+        declared = {
+            line.split("=", 1)[0].strip()
+            for line in Path(os.environ["DECLARED"]).read_text().splitlines()
+            if "=" in line and not line.startswith("[")
+        }
+        assert declared, "the wheel declares no console scripts"
+        assert set(installed) == declared, (
+            f"declared {sorted(declared)}, installed {sorted(installed)}"
+        )
+        installed = list(installed.values())
+
+        for entry in installed:
+            if entry.module == "kconfiglib.guiconfig":
+                try:
+                    import tkinter  # noqa: F401
+                except ImportError:
+                    print(f"no tkinter, skipping {entry.name}")
+                    continue
+            assert callable(entry.load()), entry.name
+
+        # These two ship no script of their own
+        for module in ("kconfiglib.rawterm", "kconfiglib.uicommon"):
+            importlib.import_module(module)
+
+        print(f"{len(installed)} console scripts resolve")
+        PY
+        /tmp/wheel-env/bin/genconfig --help > /dev/null
+
+    - name: Check editable install
+      run: |
+        set -euo pipefail
+        python -m pip install --editable .
+        # The root kconfiglib.py shadows the package whenever the checkout is
+        # the working directory, so verify the install from somewhere else.
+        cd "$(mktemp -d)"
+        python -c "from kconfiglib import Kconfig; import kconfiglib.menuconfig"
+
     - name: List built artifacts
       run: |
         set -euo pipefail

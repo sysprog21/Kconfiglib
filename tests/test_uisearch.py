@@ -227,10 +227,12 @@ def test_matches_are_pushed_to_the_tree(search):
 def mc_search(monkeypatch):
     """Returns a run() driving the real menuconfig._jump_to_matches()."""
     kconf = Kconfig("tests/Kuirender", warn=False)
-    monkeypatch.setattr(menuconfig, "_kconf", kconf, raising=False)
-    monkeypatch.setattr(menuconfig, "_show_all", True, raising=False)
-    monkeypatch.setattr(menuconfig, "_cached_sc_nodes", [], raising=False)
-    monkeypatch.setattr(menuconfig, "_cached_menu_comment_nodes", [], raising=False)
+    # A fresh _State() also brings empty search caches, so one test's sort
+    # order cannot leak into the next
+    state = menuconfig._State()
+    state.kconf = kconf
+    state.show_all = True
+    monkeypatch.setattr(menuconfig, "_s", state)
 
     def run(text):
         matches, bad_re = menuconfig._jump_to_matches(text)

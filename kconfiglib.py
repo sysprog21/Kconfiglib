@@ -634,7 +634,7 @@ from collections import namedtuple
 from glob import iglob
 from os.path import dirname, exists, expandvars, isabs, islink, join, realpath
 
-VERSION = (14, 1, 0)
+VERSION = (15, 0, 0)
 
 # Record types for the location-bearing Symbol/Choice properties. These are
 # tuple subclasses, so existing positional unpacking and indexing keep working
@@ -3451,6 +3451,14 @@ class Kconfig:
         while self._next_line():
             t0 = self._tokens[0]
 
+            owner = _PROP_OWNER.get(t0)
+            if owner is not None and node.item.__class__ not in owner:
+                # _parse_error() quotes the offending line, so naming the kind
+                # that may carry it is the whole message.
+                self._parse_error(
+                    "only " + _PROP_OWNER_STR[owner] + " can have this property"
+                )
+
             if t0 in _TYPE_TOKENS:
                 # Relies on '_T_BOOL is BOOL', etc., to save a conversion
                 self._set_type(node.item, t0)
@@ -3467,9 +3475,6 @@ class Kconfig:
                 self._parse_help(node)
 
             elif t0 is _T_SELECT:
-                if node.item.__class__ is not Symbol:
-                    self._parse_error("only symbols can select")
-
                 node.selects.append(
                     Select(self._expect_nonconst_sym(), self._parse_cond(), self.loc)
                 )
@@ -3503,14 +3508,17 @@ class Kconfig:
                 )
 
             elif t0 is _T_IMPLY:
-                if node.item.__class__ is not Symbol:
-                    self._parse_error("only symbols can imply")
-
                 node.implies.append(
                     Imply(self._expect_nonconst_sym(), self._parse_cond(), self.loc)
                 )
 
             elif t0 is _T_VISIBLE:
+                # Not table-driven: menu and comment items are both plain
+                # constants, so this is an identity test, not a class one.
+                # 'visibility' is only initialized on menu nodes.
+                if node.item is not MENU:
+                    self._parse_error("only menus can have 'visible if'")
+
                 if not self._check_token(_T_IF):
                     self._parse_error("expected 'if' after 'visible'")
 
@@ -3606,14 +3614,10 @@ class Kconfig:
                         "assumes the symbol name MODULES, like older "
                         "versions of the C implementation did when "
                         "'modules' wasn't used.",
-                        self.filename,
-                        self.linenr,
+                        self.loc,
                     )
 
             elif t0 is _T_OPTIONAL:
-                if node.item.__class__ is not Choice:
-                    self._parse_error('"optional" is only valid for choices')
-
                 node.item.is_optional = True
 
             elif t0 is _T_TRANSITIONAL:
@@ -8177,6 +8181,47 @@ _SYMBOL_CHOICE = frozenset(
         Choice,
     }
 )
+
+_SYMBOL_ONLY = frozenset({Symbol})
+_CHOICE_ONLY = frozenset({Choice})
+
+# Which node kinds may carry which property.
+#
+# 'menu' and 'comment' nodes hold a plain constant as their item rather than a
+# Symbol or a Choice, and they leave the 'help' and 'visibility' slots unset.
+# A handler that reaches for item.orig_type, item.name_and_loc, item.env_var
+# or node.help on one of those finds nothing, and the user gets an
+# AttributeError traceback instead of a line number. Checking the pairing once,
+# from a table, is what keeps the set complete: guarding handler by handler
+# only ever covers the cases somebody thought to guard.
+#
+# A token absent from the table is allowed on any node kind, which is how
+# 'depends on', 'default' and 'range' behave today.
+_PROP_OWNER = dict.fromkeys(_TYPE_TOKENS, _SYMBOL_CHOICE)
+_PROP_OWNER.update(dict.fromkeys(_DEF_TOKEN_TO_TYPE, _SYMBOL_CHOICE))
+_PROP_OWNER.update(
+    {
+        _T_HELP: _SYMBOL_CHOICE,
+        _T_PROMPT: _SYMBOL_CHOICE,
+        _T_SELECT: _SYMBOL_ONLY,
+        _T_IMPLY: _SYMBOL_ONLY,
+        _T_MODULES: _SYMBOL_ONLY,
+        _T_OPTION: _SYMBOL_ONLY,
+        _T_TRANSITIONAL: _SYMBOL_ONLY,
+        _T_OPTIONAL: _CHOICE_ONLY,
+    }
+)
+
+# 'visible if' is not in the table because it is the one property keyed on the
+# item's identity rather than its class: menu and comment nodes are both plain
+# constants, so a class test cannot tell them apart. _parse_props() checks it
+# against MENU directly.
+
+_PROP_OWNER_STR = {
+    _SYMBOL_CHOICE: "symbols and choices",
+    _SYMBOL_ONLY: "symbols",
+    _CHOICE_ONLY: "choices",
+}
 
 _MENU_COMMENT = frozenset(
     {

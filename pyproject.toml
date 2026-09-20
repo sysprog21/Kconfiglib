@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [tool.ruff]
 # Minimum supported runtime is Python 3.8 (see setup.py python_requires).
 target-version = "py38"

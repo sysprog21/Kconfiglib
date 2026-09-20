@@ -3,15 +3,18 @@
 #
 # Regression tests for the INT/HEX range helpers in menuconfig and guiconfig.
 #
-# These call the *real* _range_info()/_check_valid() functions (not a
+# These call the *real* range_info()/_check_valid() functions (not a
 # reimplementation) so that a mis-count of the sym.ranges tuples is caught here
-# instead of by a user. sym.ranges yields 4-tuples (low, high, cond, loc);
+# instead of by a user. range_info() now lives in uicommon and is shared, so it
+# is tested once; _check_valid() is still a separate copy in each tool and is
+# tested in both. sym.ranges yields 4-tuples (low, high, cond, loc);
 # unpacking them as 3-tuples was the root cause of issue #41, which shipped
 # because nothing exercised these paths.
 
 import pytest
 
 import menuconfig
+import uicommon
 from kconfiglib import Kconfig
 
 
@@ -21,22 +24,22 @@ def kconf():
 
 
 # ---------------------------------------------------------------------------
-# menuconfig
+# range_info, shared by both tools since it moved to uicommon
 # ---------------------------------------------------------------------------
 
 
-def test_menuconfig_range_info_active(kconf):
+def test_range_info_active(kconf):
     # Active range -> the loop body unpacks a 4-tuple. This is the #41 path.
-    assert menuconfig._range_info(kconf.syms["INT_RANGE_10_20"]) == "Range: 10-20"
-    assert menuconfig._range_info(kconf.syms["HEX_RANGE_10_20"]) == "Range: 0x10-0x20"
+    assert uicommon.range_info(kconf.syms["INT_RANGE_10_20"]) == "Range: 10-20"
+    assert uicommon.range_info(kconf.syms["HEX_RANGE_10_20"]) == "Range: 0x10-0x20"
 
 
-def test_menuconfig_range_info_none(kconf):
+def test_range_info_none(kconf):
     # No range, and all-ranges-disabled (cond is n): still iterates and unpacks
     # every tuple, but reports no active range.
-    assert menuconfig._range_info(kconf.syms["INT_NO_RANGE"]) is None
-    assert menuconfig._range_info(kconf.syms["INT_ALL_RANGES_DISABLED"]) is None
-    assert menuconfig._range_info(kconf.syms["HEX_ALL_RANGES_DISABLED"]) is None
+    assert uicommon.range_info(kconf.syms["INT_NO_RANGE"]) is None
+    assert uicommon.range_info(kconf.syms["INT_ALL_RANGES_DISABLED"]) is None
+    assert uicommon.range_info(kconf.syms["HEX_ALL_RANGES_DISABLED"]) is None
 
 
 def test_menuconfig_check_valid(kconf, monkeypatch):
@@ -68,16 +71,6 @@ def test_menuconfig_check_valid(kconf, monkeypatch):
 @pytest.fixture(scope="module")
 def guiconfig():
     return pytest.importorskip("guiconfig")
-
-
-def test_guiconfig_range_info_active(guiconfig, kconf):
-    assert guiconfig._range_info(kconf.syms["INT_RANGE_10_20"]) == "Range: 10-20"
-    assert guiconfig._range_info(kconf.syms["HEX_RANGE_10_20"]) == "Range: 0x10-0x20"
-
-
-def test_guiconfig_range_info_none(guiconfig, kconf):
-    assert guiconfig._range_info(kconf.syms["INT_NO_RANGE"]) is None
-    assert guiconfig._range_info(kconf.syms["INT_ALL_RANGES_DISABLED"]) is None
 
 
 def test_guiconfig_check_valid(guiconfig, kconf, monkeypatch):
